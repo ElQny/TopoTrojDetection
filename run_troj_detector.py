@@ -85,7 +85,7 @@ def main(args):
                 if filename.endswith('.pt.1'):
                     model_file_path = os.path.join(root_m, filename)
                 if filename.endswith('gt.txt'):
-                    gt_file = os.path.join(root_m, gt_file)
+                    gt_file = os.path.join(root_m, filename)
                 if filename.endswith('.json'):
                     model_config_path = os.path.join(root_m, filename)
                 if filename.endswith('experiment_train.csv'):
@@ -108,8 +108,9 @@ def main(args):
             continue
 
         if gt_file:
-            with open(args.gt_file, "w") as f:
-                gt = int(f.readlines().strip())
+            with open(gt_file, "r") as f:
+                lines = f.readlines()[0]
+                gt = int(lines.strip())
         else:
             gt = ('final_triggered_data_n_total' in model_config.keys())
         gt_list.append(gt)
