@@ -169,8 +169,8 @@ def main(args):
         psf_topk_max=psf_feature_dat.topk(k=min(3, total_examples), dim=3)[0].mean(2).max(2)[0].view(len(gt_list), -1)
         psf_feature_dat=torch.cat([psf_diff_max, psf_med_max, psf_std_max, psf_topk_max], dim=1)
 
-        # dat=torch.cat([psf_feature_dat, topo_feature.view(topo_feature.shape[0], -1)], dim=1)
-        dat = topo_feature.view(topo_feature.shape[0], -1)
+        dat=torch.cat([psf_feature_dat, topo_feature.view(topo_feature.shape[0], -1)], dim=1)
+        # dat = topo_feature.view(topo_feature.shape[0], -1)
         dat=preprocessing.scale(dat)
         gt_list=torch.tensor(gt_list)
 
