@@ -24,7 +24,7 @@ from datetime import date
 from tqdm import tqdm
 import glob
 
-from topological_feature_extractor_pointcloud import topo_psf_feature_extract
+from topological_feature_extractor import topo_psf_feature_extract
 from run_crossval import run_crossval_xgb, run_crossval_mlp
 
 # Algorithm Configuration
