@@ -24,7 +24,7 @@ from datetime import date
 from tqdm import tqdm
 import glob
 
-from topological_feature_extractor import topo_psf_feature_extract
+from topological_feature_extractor_pointcloud import topo_psf_feature_extract
 from run_crossval import run_crossval_xgb, run_crossval_mlp
 
 # Algorithm Configuration
@@ -36,13 +36,20 @@ USE_EXAMPLE: bool =  False     # Whether clean inputs will be given or not
 CORR_METRIC: str = 'distcorr'   # Correlation metric to be used
 CLASSIFIER: str  = 'xgboost'    # Classifier for the detection , choice = {xgboost, mlp}.
 # Experiment Configuration
-INPUT_SIZE: List = [1, 28, 28] # Input images' shape (default to be MNIST)
+INPUT_SIZE: List = [23,3,1024] # Input images' shape (default to be MNIST)
 INPUT_RANGE: List = [0, 255]   # Input image range
 TRAIN_TEST_SPLIT: float = 0.8  # Ratio of train to test
 
+PC_ROOT: str = '/home/lisa/Desktop/Bac2_Program/modelnet40'
+IMPORT_PATH: str = '/home/lisa/Desktop/Bac2_Program/PCBA'
+
+import sys
+from pathlib import Path
+sys.path.append(str(Path(IMPORT_PATH).resolve())) #imports the structure of the nn-Model from the model file (from where the pointcloud-neural-network was generated)
+import model
 
 def main(args):
-
+ #Seeding:
     seed = args.seed
     random.seed(seed)
     np.random.seed(seed)
@@ -53,7 +60,7 @@ def main(args):
 
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_ind
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-
+# init Dictionary psf_config with input values
     psf_config = {}
     psf_config['step_size'] = STEP_SIZE
     psf_config['stim_level'] = STIM_LEVEL
@@ -62,6 +69,7 @@ def main(args):
     psf_config['input_range'] = INPUT_RANGE
     psf_config['n_neuron'] = N_SAMPLE_NEURONS
     psf_config['corr_method'] = CORR_METRIC
+    psf_config['pc_root'] = PC_ROOT
     psf_config['device'] = device
 
     root = args.data_root
@@ -80,9 +88,10 @@ def main(args):
         model_train_example_config = None
         gt_file = None
 
+        #sets paths to files / folders
         for root_m, dirnames, filenames in os.walk(os.path.join(root, model_name)):
             for filename in filenames:
-                if filename.endswith('.pt.1'):
+                if filename.endswith('.pt.1') or filename.endswith('.pt'):
                     model_file_path = os.path.join(root_m, filename)
                 if filename.endswith('gt.txt'):
                     gt_file = os.path.join(root_m, filename)
@@ -94,10 +103,13 @@ def main(args):
                 break
 
         try:
-            model_file_path = model_file_path
-            model = torch.load(model_file_path).to(device)
-        except:
+            print(f"Modelfile path {model_file_path}")
+            model = torch.load(model_file_path) #load model for evaluation
+            print(type(model))
+            test = model.to(device)
+        except Exception as e:
             print("Model {} .pt file is missing, skip to next model".format(model_name))
+            print(e)
             continue
         model.eval()
 
@@ -107,37 +119,21 @@ def main(args):
             print("Model {} config is missing, skip to next model".format(model_config))
             continue
 
-        if gt_file:
-            with open(gt_file, "r") as f:
+        if gt_file: #if gt exists
+            with open(gt_file, "r") as f: #changed this from args.gt_file -> gt_file (since gt_file was initialized above)
                 lines = f.readlines()[0]
-                gt = int(lines.strip())
+                gt = int(lines.strip()) #read out what the gt is (trojanized or not?)
         else:
-            gt = ('final_triggered_data_n_total' in model_config.keys())
-        gt_list.append(gt)
+            gt = ('final_triggered_data_n_total' in model_config.keys()) #else check the json for filan_triggered_data_n_total
+        gt_list.append(gt) #if that exists -> it is trojanized, else it is not trojanized -> append this to gt_list
 
-        img_c = None
+        img_c = None #!! Picture for pixel-wise peturbation is blank (default)
         total_examples = 1 # Default to be a blank image if USE_EXAMPLE=False
         # If use_examples then read in clean input example images
-        if USE_EXAMPLE and os.path.exists(model_train_example_config):
-            img_c = defaultdict(list)
-            example_file = pd.read_csv(model_train_example_config)
-            example_file.sample(frac=1)
-            n_classes = len(example_file['true_label'].unique())
-            for ind in range(example_file.shape[0]):
-                if example_file['triggered'].iloc[ind]:
-                    continue
-                c = example_file['true_label'].iloc[ind]
-                if not len(img_c[c]):
-                    img_file=glob.glob(os.path.join(root, model_name, '**', example_file['file'].iloc[ind]), recursive=True)[0]
-                    img = torch.from_numpy(cv2.imread(img_file, cv2.IMREAD_UNCHANGED)).float()
-                    img_c[c].append(img.permute(2,0,1).unsqueeze(0))
-                total_examples = sum([len(img_c[c]) for c in img_c])
-                if len(img_c.keys()) == n_classes and total_examples == n_classes:
-                    break
 
         model_file_path_prefix = '/'.join(model_file_path.split('/')[:-1])
         save_file_path = os.path.join(model_file_path_prefix, 'test_extracted_psf_topo_feature.pkl')
-        fv = topo_psf_feature_extract(model, img_c, psf_config)
+        fv = topo_psf_feature_extract(model, img_c, psf_config) #extract the features from the model -> TODO: change this since we are working with different features now!
         with open(save_file_path, 'wb') as f:
             pkl.dump(fv, f)
         f.close()
@@ -156,24 +152,25 @@ def main(args):
         #   h: height of the feature map
         #   L: number of stimulation levels
         #   C: number of classes
-        psf_feature=torch.cat([fv_list[i]['psf_feature_pos'].unsqueeze(0) for i in range(len(fv_list))])
+        # psf_feature=torch.cat([fv_list[i]['psf_feature_pos'].unsqueeze(0) for i in range(len(fv_list))])
         # TOPO feature shape = N*12 where 12 is the total number of topological feature from dim0 and dim1
-        topo_feature = torch.cat([fv_list[i]['topo_feature_pos'].unsqueeze(0) for i in range(len(fv_list))])
+        topo_feature = torch.cat([fv_list[i]['topo_feature_pos'].unsqueeze(0) for i in range(len(fv_list))]) #collects all features from PSF
 
-        topo_feature[np.where(topo_feature==np.Inf)]=1
-        n, _, nEx, fnW, fnH, nStim, C = psf_feature.shape
-        psf_feature_dat=psf_feature.reshape(n, 2, -1, nStim, C)
-        psf_diff_max=(psf_feature_dat.max(dim=3)[0]-psf_feature_dat.min(dim=3)[0]).max(2)[0].view(len(gt_list), -1)
-        psf_med_max=psf_feature_dat.median(dim=3)[0].max(2)[0].view(len(gt_list), -1)
-        psf_std_max=psf_feature_dat.std(dim=3).max(2)[0].view(len(gt_list), -1)
-        psf_topk_max=psf_feature_dat.topk(k=min(3, total_examples), dim=3)[0].mean(2).max(2)[0].view(len(gt_list), -1)
-        psf_feature_dat=torch.cat([psf_diff_max, psf_med_max, psf_std_max, psf_topk_max], dim=1)
+        # topo_feature[np.where(topo_feature==np.Inf)]=1
+        # n, _, nEx, fnW, fnH, nStim, C = psf_feature.shape
+        # psf_feature_dat=psf_feature.reshape(n, 2, -1, nStim, C)
+        # psf_diff_max=(psf_feature_dat.max(dim=3)[0]-psf_feature_dat.min(dim=3)[0]).max(2)[0].view(len(gt_list), -1)
+        # psf_med_max=psf_feature_dat.median(dim=3)[0].max(2)[0].view(len(gt_list), -1)
+        # psf_std_max=psf_feature_dat.std(dim=3).max(2)[0].view(len(gt_list), -1)
+        # psf_topk_max=psf_feature_dat.topk(k=min(3, total_examples), dim=3)[0].mean(2).max(2)[0].view(len(gt_list), -1)
+        # psf_feature_dat=torch.cat([psf_diff_max, psf_med_max, psf_std_max, psf_topk_max], dim=1)
 
-        dat=torch.cat([psf_feature_dat, topo_feature.view(topo_feature.shape[0], -1)], dim=1)
-        # dat = topo_feature.view(topo_feature.shape[0], -1)
+        # dat=torch.cat([psf_feature_dat, topo_feature.view(topo_feature.shape[0], -1)], dim=1)
+        dat = topo_feature.view(topo_feature.shape[0], -1) #collects all topological features
         dat=preprocessing.scale(dat)
         gt_list=torch.tensor(gt_list)
 
+# do train-test Split!
         N = len(gt_list)
         n_train = int(TRAIN_TEST_SPLIT * N)
         ind_reshuffle = np.random.choice(list(range(N)), N, replace=False)
@@ -204,70 +201,6 @@ def main(args):
         ce_test = np.sum(-(labels * np.log(y_pred) + (1 - labels) * np.log(1 - y_pred))) / len(y_pred)
 
 
-    if CLASSIFIER=='mlp':
-        dat=[]
-        for i in range(len(fv_list)):
-            psf_fv_pos_i=fv_list[i]['psf_feature_pos']
-            _, nEx, fh, fw, nSim, C = psf_fv_pos_i.shape
-            psf_fv_pos_i=psf_fv_pos_i.permute(5, 0, 1, 2, 3, 4)
-            psf_fv_pos_i=psf_fv_pos_i.reshape(C, -1)
-            topo_fv_pos_i=fv_list[i]['topo_feature_pos'].view(nEx, -1)
-            dat_pos_i={'psf_fv_pos_i':psf_fv_pos_i, 'topo_fv_pos_i':topo_fv_pos_i}
-            dat.append(dat_pos_i)
-
-        N = len(dat)
-        n_train = int(TRAIN_TEST_SPLIT * N)
-        ind_reshuffle = np.random.choice(list(range(N)), N, replace=False)
-        train_ind = ind_reshuffle[:n_train]
-        test_ind = ind_reshuffle[n_train:]
-
-        feature_train = [dat[i] for i in train_ind]
-        feature_test = [dat[i] for i in test_ind]
-        gt_train = [gt_list[i] for i in train_ind]
-        gt_test = [gt_list[i] for i in test_ind]
-
-        # Run the training and hyper-parameter searching process
-        print('Running hyper-parameter searching and training')
-        best_model_list = run_crossval_mlp(feature_train, gt_train)
-
-        # Evaluation
-        output_mv=torch.zeros(len(feature_test), 2).cuda()
-        for i in range(len(best_model_list['models'])):
-            psf_encoder, topo_encoder, cls = best_model_list['models'][i]
-            weight = best_model_list['weight'][i]/sum(best_model_list['weight'])
-
-            psf_encoder.eval()
-            topo_encoder.eval()
-            cls.eval()
-            correct = 0
-            total = 0
-            for j in range(0, max(int((len(feature_test) - 1) / 32), 1)):
-                batch = feature_test[(32*j):min(32*(j+1), len(feature_test))] # 32 is the batch size
-                embedding_list = []
-                for single_input in batch:
-                    psf_fv_pos_i=single_input['psf_fv_pos_i'].cuda()
-                    topo_fv_pos_i=single_input['topo_fv_pos_i'].cuda()
-                    psf_embedding=psf_encoder(psf_fv_pos_i)
-                    # Tricks to handle single data point batch. Repeat this data point 5 times and add some Gaussian noise
-                    if len(topo_fv_pos_i)==1:
-                        topo_fv_pos_i=topo_fv_pos_i.repeat(5, 1)+torch.randn(5, topo_fv_pos_i.shape[1]).cuda()
-                    topo_embedding=topo_encoder(topo_fv_pos_i)
-                    embedding=torch.cat([psf_embedding.mean(0).flatten(), topo_embedding.mean(0).flatten()])
-                    embedding_list.append(embedding)
-                embeddings = torch.cat([x.unsqueeze(0) for x in embedding_list])
-                output = cls(embeddings)
-                output_mv[(32*j):min(32*(j+1), len(feature_test))]+=output*weight
-
-        gt_test=torch.tensor(gt_test)
-        output=output_mv
-        score=torch.nn.functional.softmax(output, 1).detach().cpu()
-        pred = score.argmax(1)
-        correct += pred.eq(gt_test).sum().item()
-        total += len(gt_test)
-        acc_test = correct / total
-        auc_test = roc_auc_score(gt_test.detach().cpu().numpy(), score[:, 1].numpy())
-        ce_test = -np.mean(np.array(gt_test)*np.log(np.maximum(score[:,1].numpy(), 1e-4))+(1-np.array(gt_test))*np.log(np.maximum(1-score[:,1].numpy(), 1e-4)))
-
     logger_name=date.today().strftime("%d-%m-%Y")+'_synthetic_'+"-".join([str(x) for x in psf_config['input_shape']])
     logger_file=os.path.join(args.log_path, logger_name)
     if not os.path.exists(args.log_path):
@@ -289,7 +222,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, help="Experiment random seed", default=123)
     args = parser.parse_args()
 
-    exp_logfile=date.today().strftime("%d-%m-%Y")+f'{CORR_METRIC}_{CLASSIFIER}_{N_SAMPLE_NEURONS}_{STEP_SIZE}_{STIM_LEVEL}_{PATCH_SIZE}.json'
+    exp_logfile=date.today().strftime("%d-%m-%Y")+f'{CORR_METRIC}_{CLASSIFIER}_{N_SAMPLE_NEURONS}.json'
     exp_logfile=os.path.join(args.log_path, exp_logfile)
     exp_config={}
     for k, v in args._get_kwargs():

@@ -147,10 +147,11 @@ def topo_psf_feature_extract(model: torch.nn.Module, example_dict: Dict, psf_con
     Return:
         fv (Dict). Dictionary contains extracted features
     """
+    # reads out parameters from psf_config (dictionary)
     step_size=psf_config['step_size']
     stim_level=psf_config['stim_level']
     patch_size=psf_config['patch_size']
-    input_shape=psf_config['input_shape']
+    input_shape=psf_config['input_shape'] #TODO
     input_valuerange=psf_config['input_range']
     n_neuron_sample=psf_config['n_neuron']
     method=psf_config['corr_method']
@@ -188,6 +189,7 @@ def topo_psf_feature_extract(model: torch.nn.Module, example_dict: Dict, psf_con
         12
     )
 
+    # pixel-wise peturbation strategy:
     PH_list=[]
     PD_list=[]
     rips = Rips(verbose=False)
@@ -244,7 +246,7 @@ def topo_psf_feature_extract(model: torch.nn.Module, example_dict: Dict, psf_con
                 if len(neural_act)>1.5e3:
                     neural_act, sample_n_neurons_list=sample_act(neural_act, layer_list, sample_size=n_neuron_sample)
 
-                # Build neural correlation matrix
+                # Build neural correlation matrix (depending on correlation method)
                 if method=='distcorr':
                     neural_pd=mat_discorr_adjacency(neural_act)
                 elif method=='bc':
@@ -258,27 +260,28 @@ def topo_psf_feature_extract(model: torch.nn.Module, example_dict: Dict, psf_con
                     neural_act=torch.softmax(neural_act, 1)
                     neural_pd=mat_jsdiv_adjacency(neural_act)
                 else:
-                    raise Exception(f"Correlation metrics {method} doesn't implemented !")
+                    raise Exception(f"Correlation metric {method} isn't implemented !")
+                #Distance Matrix generation (D = 1-correlation) -> weights for correlation matrix!
                 D=1-neural_pd.detach().cpu().numpy() if method!='bc' else -np.log(neural_pd.detach().cpu().numpy()+1e-6)
                 PD_list.append(neural_pd.detach().cpu().numpy())
 
                 # Approaximate sparse filtration to further save some computation
                 if model._get_name=='ModdedLeNet5Net':
-                    PH=rips.fit_transform(D, distance_matrix=True)
+                    PH=rips.fit_transform(D, distance_matrix=True) #directly calling ripser
                 else:
-                    lambdas=getGreedyPerm(D)
-                    D = getApproxSparseDM(lambdas, 0.1, D)
-                    PH=rips.fit_transform(D, distance_matrix=True)
-
+                    lambdas=getGreedyPerm(D) #furthest-point-sampling
+                    D = getApproxSparseDM(lambdas, 0.1, D) #approx. distance matrix building
+                    PH=rips.fit_transform(D, distance_matrix=True) #calling ripser -> faster calculation for larger networks
+                # PH = persistent homology (basically persistence diagram)
                 PH[0]=np.array(PH[0])
                 PH[1]=np.array(PH[1])
                 PH[0][np.where(PH[0]==np.inf)]=1
                 PH[1][np.where(PH[1]==np.inf)]=1
                 PH_list.append(PH)
                 # Compute the topological feature with the persistent diagram
-                clean_feature_0=calc_topo_feature(PH, 0)
-                clean_feature_1=calc_topo_feature(PH, 1)
-                topo_feature=[]
+                clean_feature_0=calc_topo_feature(PH, 0) #6 topological features for dimension 0
+                clean_feature_1=calc_topo_feature(PH, 1) #6 topological features for dimension 1
+                topo_feature=[] #append all these features to topo_feature array -> 12 features
                 for k in sorted(list(clean_feature_0)):
                     topo_feature.append(clean_feature_0[k])
                 for k in sorted(list(clean_feature_1)):
