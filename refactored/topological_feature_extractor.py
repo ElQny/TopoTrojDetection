@@ -8,97 +8,15 @@ import numpy as np
 import torch
 
 from ripser import Rips
-from pointcloud_helper import create_sample_pointcloud_for_tensor, gen_tensor_from_pointcloud
+from pointcloud_helper import *
 
 # Total number of neurons to be sampled
 SAMPLE_LIMIT = 3e3
-
-
-# ---------------------------------------------------------------------
-# Image preprocessing
-# ---------------------------------------------------------------------
-
-# # TODO: replace
-# def compute_center_crop_offsets_for_224(
-#     img_shape: Tuple[int, int, int]
-# ) -> Tuple[int, int]:
-#     """
-#     Compute the center-crop offsets used by the original preprocessing logic.
-#     """
-#     h, w, c = img_shape
-#     dx = int((w - 224) / 2)
-#     dy = int((w - 224) / 2)
-#     return dx, dy
-#
-#
-# # TODO: replace
-# def crop_image_to_224_center(img: np.ndarray, dx: int, dy: int) -> np.ndarray:
-#     """
-#     Crop an image to a 224x224 center crop using precomputed offsets.
-#     """
-#     return img[dy:dy + 224, dx:dx + 224, :]
-#
-#
-# # TODO: replace
-# def convert_hwc_to_chw(img: np.ndarray) -> np.ndarray:
-#     """
-#     Convert image layout from HWC to CHW.
-#     """
-#     return np.transpose(img, (2, 0, 1))
-#
-#
-# # TODO: replace
-# def add_batch_dimension(img: np.ndarray) -> np.ndarray:
-#     """
-#     Convert CHW tensor-like array to NCHW by adding batch dimension.
-#     """
-#     return np.expand_dims(img, 0)
-#
-#
-# # TODO: replace
-# def subtract_image_minimum(img: np.ndarray) -> np.ndarray:
-#     """
-#     Shift image values so the minimum becomes zero.
-#     """
-#     return img - np.min(img)
-#
-#
-# # TODO: replace
-# def divide_by_image_maximum(img: np.ndarray) -> np.ndarray:
-#     """
-#     Normalize image by its maximum value.
-#     """
-#     return img / np.max(img)
-#
-#
-# # TODO: replace
-# def convert_numpy_image_to_float_tensor(img: np.ndarray) -> torch.FloatTensor:
-#     """
-#     Convert numpy array to float tensor.
-#     """
-#     return torch.FloatTensor(img)
-#
-#
-# # TODO: replace
-# def img_std(img):
-#     """
-#     Reshape and rescale the input images to fit the model.
-#     """
-#     dx, dy = compute_center_crop_offsets_for_224(img.shape)
-#     img = crop_image_to_224_center(img, dx, dy)
-#     img = convert_hwc_to_chw(img)
-#     img = add_batch_dimension(img)
-#     img = subtract_image_minimum(img)
-#     img = divide_by_image_maximum(img)
-#     batch_data = convert_numpy_image_to_float_tensor(img)
-#     return batch_data
-
 
 # ---------------------------------------------------------------------
 # Model architecture parsing
 # ---------------------------------------------------------------------
 
-# can stay
 def module_has_children(module: torch.nn.Module) -> bool:
     """
     Return True if a module contains child modules.
@@ -113,7 +31,6 @@ def is_supported_feature_module(module: torch.nn.Module) -> bool:
     return isinstance(module, torch.nn.Conv1d) or isinstance(module, torch.nn.Linear)
 
 
-# can stay
 def prefix_submodule_names(parent_name: str, child_names: List[str]) -> List[str]:
     """
     Prefix recursively extracted layer names with the current parent module name.
@@ -153,7 +70,6 @@ def parse_arch(model: torch.tensor) -> Tuple[List, List]:
 # Forward-hook feature collection
 # ---------------------------------------------------------------------
 
-# can stay
 def extract_hook_input_tensor(f_in) -> torch.Tensor:
     """
     Extract the tensor input seen by a forward hook, matching the original logic.
@@ -162,16 +78,12 @@ def extract_hook_input_tensor(f_in) -> torch.Tensor:
         return f_in.detach().cpu()
     return f_in[0].detach().cpu()
 
-
-# can stay
 def register_feature_hooks(module_list: List[torch.nn.Module], hook_fn) -> List:
     """
     Register a forward hook on every module in module_list.
     """
     return [module.register_forward_hook(hook=hook_fn) for module in module_list]
 
-
-# can stay
 def remove_feature_hooks(handle_list: List) -> None:
     """
     Remove all registered forward hooks.
@@ -179,8 +91,6 @@ def remove_feature_hooks(handle_list: List) -> None:
     for handle in handle_list:
         handle.remove()
 
-
-# can stay
 def map_layer_outputs_to_feature_dict(
     outs: List[torch.Tensor],
     module_k: List[str],
@@ -194,7 +104,6 @@ def map_layer_outputs_to_feature_dict(
     return feature_dict
 
 
-# can stay
 def feature_collect(model: torch.tensor, pointclouds: torch.tensor) -> Tuple[Dict, torch.tensor]:
     """
     Helper function to collection intermediate output of a model for given inputs.
@@ -257,7 +166,7 @@ def compute_cumulative_neuron_boundaries(neuron_counts: List[int]) -> List[int]:
 
 
 # TODO: replace/extend with out_features??
-# rename...
+# rename...?
 def extract_original_layer_neuron_counts(layer_list: List) -> List[int]:
     """
     Reproduce the original layer-neuron extraction logic from layer_list[0].
@@ -348,7 +257,7 @@ def sample_act(
 # Block pooling over layer-wise correlation blocks
 # ---------------------------------------------------------------------
 
-# TODO: replace/extend
+# TODO: replace/extend (as above)
 def resolve_neuron_boundaries_for_process_pd(
     layer_list: List,
     sample_n_neurons_list: Optional[List] = None,
@@ -433,7 +342,7 @@ def write_symmetric_block_value(
     maxpool_pd[j, i] = value
 
 
-# TODO: replace/extend
+# TODO: replace/extend (as above)
 def process_pd(
     pd: torch.tensor,
     layer_list: List,
@@ -586,7 +495,6 @@ def set_matrix_diagonal_to_one(pd: torch.Tensor) -> torch.Tensor:
     return pd
 
 
-# can stay
 def mat_discorr_adjacency(X: torch.tensor, Y: torch.tensor = None) -> torch.tensor:
     """
     Distance-correlation matrix calculation in tensor format. Return pairwise distance correlation among all row vectors in X.
@@ -604,7 +512,6 @@ def mat_discorr_adjacency(X: torch.tensor, Y: torch.tensor = None) -> torch.tens
     pd = set_matrix_diagonal_to_one(pd)
 
     return pd
-
 
 # ---------------------------------------------------------------------
 # Bhattacharyya-correlation helper math
@@ -639,7 +546,6 @@ def compute_rowwise_similarity_by_matrix_product(X: torch.Tensor) -> torch.Tenso
     return torch.matmul(X, X.T)
 
 
-# can stay
 def mat_bc_adjacency(X):
     """
     Bhattacharyya correlation matrix version. Return pairwise BC correlation among all row vectors in X.
@@ -672,7 +578,6 @@ def normalize_rows_by_l2_norm(
     return X / (norms + eps)
 
 
-# can stay
 def mat_cos_adjacency(X):
     """
     Cosine similarity matrix version. Return pairwise cos correlation among all row vectors in X.
@@ -749,7 +654,6 @@ def divide_covariance_by_row_and_column_scales(
     return cov / sigma.view(-1, 1) / sigma.view(1, -1)
 
 
-# can stay
 def mat_pearson_adjacency(X):
     """
     Pearson correlation matrix version. Return pairwise Pearson correlation among all row vectors in X.
@@ -852,7 +756,6 @@ def combine_js_terms_to_distance_matrix(
     return 1 / 2 * (paqdiag[:, None] + paqdiag[None, :] - cross_term)
 
 
-# can stay
 def mat_jsdiv_adjacency(X):
     """
     Jensen-Shannon Divergence matrix version. Return pairwise JS divergence among all row vectors in X.
@@ -863,228 +766,28 @@ def mat_jsdiv_adjacency(X):
     cross_term = compute_js_cross_entropy_term(paq, eps=1e-4)
     return combine_js_terms_to_distance_matrix(paqdiag, cross_term)
 
+#----------------------------------
 
-
-
-def extract_original_layer_neuron_counts(module_list):
-    conv_nfilters_list = extract_conv_input_counts(module_list)
-    linear_nneurons_list = extract_linear_input_counts(module_list)
-    return combine_layer_neuron_counts(conv_nfilters_list, linear_nneurons_list)
-
-def topo_psf_feature_extract(
-    model: torch.nn.Module,
-    img_c,
-    psf_config: Dict,
-) -> Dict:
+def topo_psf_feature_extract(model, example_pointcloud, psf_config) -> Dict:
     """
-    Point-cloud version of topo_psf_feature_extract.
-
-    Expected model input shape:
-        (B, 3, N)
-
-    This function:
-    1) creates or accepts a base point cloud,
-    2) generates point-block perturbations,
-    3) collects intermediate activations,
-    4) builds a neuron correlation matrix,
-    5) pools it to layer level,
-    6) extracts 12 topological summary features (6 from H0, 6 from H1).
-
-    Required external imports in this file:
-        from ripser import Rips
-        from pointcloud_helper import create_sample_pointcloud_for_tensor, gen_tensor_from_pointcloud
+        Combines all above functions as well as helper functions:
+        - builds the pointcloud (without any example pointclouds)
+        - generates perturbed pointclouds by cube-wise-perturbation
+        - uses the DNN previously generated to get activation vectors
+        - generates distance matrix from vectors
+        - vectors are turned into topological features
     """
-    step_size = int(psf_config["step_size"])
-    stim_level = int(psf_config["stim_level"])
-    patch_size = int(psf_config["patch_size"])
-    input_shape = psf_config["input_shape"]
-    input_range = psf_config["input_range"]
-    n_neuron_sample = int(psf_config["n_neuron"])
-    corr_method = psf_config["corr_method"]
-    device = psf_config["device"]
+    # reads out parameters from psf_config (dictionary)
+    step_size = psf_config['step_size']
+    stim_level = psf_config['stim_level']
+    patch_size = psf_config['patch_size']
+    input_shape = psf_config['input_shape']
+    input_valuerange = psf_config['input_range']
+    n_neuron_sample = psf_config['n_neuron']
+    method = psf_config['corr_method']
+    device = psf_config['device']
 
-    model = model.to(device)
-    model.eval()
+    granularity = psf_config['granularity'] #TODO
 
-    # ------------------------------------------------------------------
-    # Base point cloud
-    # ------------------------------------------------------------------
-    if img_c is None:
-        # We only need one base point cloud for stimulation.
-        # Use the last entry of input_shape as number of points.
-        n_points = int(input_shape[-1])
-        base_pc_np = create_sample_pointcloud_for_tensor(B=1, N=n_points)
-        base_pc = gen_tensor_from_pointcloud(base_pc_np).to(device)   # (1, 3, N)
-    else:
-        if isinstance(img_c, np.ndarray):
-            base_pc = torch.FloatTensor(img_c).to(device)
-        elif isinstance(img_c, torch.Tensor):
-            base_pc = img_c.to(device)
-        else:
-            raise TypeError("img_c must be None, np.ndarray, or torch.Tensor")
 
-        if base_pc.ndim == 2:
-            # (3, N) -> (1, 3, N)
-            base_pc = base_pc.unsqueeze(0)
-
-    if base_pc.ndim != 3 or base_pc.shape[1] != 3:
-        raise ValueError(f"Expected point cloud of shape (B, 3, N), got {tuple(base_pc.shape)}")
-
-    _, _, n_points = base_pc.shape
-
-    # If the run script still uses [0,255], override to a normalized point-cloud range.
-    if (
-        isinstance(input_range, (list, tuple))
-        and len(input_range) == 2
-        and float(input_range[1]) > 2.0
-    ):
-        stim_seq = np.linspace(-1.0, 1.0, stim_level, dtype=np.float32)
-    else:
-        stim_seq = np.linspace(float(input_range[0]), float(input_range[1]), stim_level, dtype=np.float32)
-
-    # Forward once to infer number of classes
-    with torch.no_grad():
-        out0 = model(base_pc)
-    num_classes = int(out0.shape[1])
-
-    # ------------------------------------------------------------------
-    # Point-block stimulation positions
-    # ------------------------------------------------------------------
-    point_positions = list(range(0, max(1, n_points - patch_size + 1), step_size))
-    if len(point_positions) == 0:
-        point_positions = [0]
-
-    topo_feature_pos = []
-    psf_feature_pos = []
-
-    rips = Rips(verbose=False)
-    layer_list, _ = parse_arch(model)
-
-    # ------------------------------------------------------------------
-    # For each stimulated point block, build one topological feature vector
-    # ------------------------------------------------------------------
-    for pos in point_positions:
-        # Build batch of stimulated variants: (stim_level, 3, N)
-        prob_input = base_pc.repeat(len(stim_seq), 1, 1)
-
-        for s_idx, stim_val in enumerate(stim_seq):
-            end_pos = min(pos + patch_size, n_points)
-            prob_input[s_idx, :, pos:end_pos] = float(stim_val)
-
-        with torch.no_grad():
-            feature_dict_c, output = feature_collect(model, prob_input)
-
-        # Save logits/confidence for compatibility (not used later in your run script)
-        psf_score = output.detach().cpu()
-        psf_conf = torch.nn.functional.softmax(psf_score, dim=1)
-        psf_feature_pos.append(torch.stack([psf_score, psf_conf], dim=0))
-
-        # --------------------------------------------------------------
-        # Convert hooked tensors into per-neuron activation vectors
-        # --------------------------------------------------------------
-        neural_act = []
-
-        for k in feature_dict_c:
-            layer_tensor = feature_dict_c[k]
-
-            # Conv1d input hook: usually (L, C, N)
-            if layer_tensor.ndim == 3:
-                # reduce over point dimension, keep one value per channel per stimulation
-                layer_act = layer_tensor.max(dim=2)[0].T  # (C, L)
-
-            # Linear input hook: usually (L, F)
-            elif layer_tensor.ndim == 2:
-                layer_act = layer_tensor.T  # (F, L)
-
-            else:
-                raise ValueError(
-                    f"Unsupported hooked tensor shape {tuple(layer_tensor.shape)} for layer {k}"
-                )
-
-            layer_act = (
-                layer_act - layer_act.mean(dim=1, keepdim=True)
-            ) / (layer_act.std(dim=1, keepdim=True) + 1e-30)
-
-            neural_act.append(layer_act)
-
-        neural_act = torch.cat(neural_act, dim=0)  # (total_neurons, stim_level)
-
-        if neural_act.shape[0] > n_neuron_sample:
-            neural_act, sample_n_neurons_list = sample_act(
-                neural_act, layer_list, sample_size=n_neuron_sample
-            )
-        else:
-            sample_n_neurons_list = None
-
-        # --------------------------------------------------------------
-        # Correlation matrix
-        # --------------------------------------------------------------
-        if corr_method == "distcorr":
-            neuron_pd = mat_discorr_adjacency(neural_act)
-        elif corr_method == "bc":
-            neuron_pd = mat_bc_adjacency(neural_act)
-        elif corr_method == "cos":
-            neuron_pd = mat_cos_adjacency(neural_act)
-        elif corr_method == "pearson":
-            neuron_pd = mat_pearson_adjacency(neural_act)
-        elif corr_method == "js":
-            neuron_pd = mat_jsdiv_adjacency(neural_act)
-        else:
-            raise ValueError(f"Unsupported corr_method: {corr_method}")
-
-        neuron_pd = neuron_pd.detach().cpu()
-        layer_pd = process_pd(neuron_pd, layer_list, sample_n_neurons_list=sample_n_neurons_list)
-
-        # --------------------------------------------------------------
-        # Convert similarity/correlation-like matrix to distance matrix
-        # --------------------------------------------------------------
-        dist_mat = 1.0 - np.array(layer_pd, dtype=np.float32)
-        dist_mat = np.maximum(dist_mat, 0.0)
-        np.fill_diagonal(dist_mat, 0.0)
-
-        # --------------------------------------------------------------
-        # Persistent homology
-        # --------------------------------------------------------------
-        dgms = rips.fit_transform(dist_mat, distance_matrix=True)
-
-        def summarize_dgm(dgm: np.ndarray) -> List[float]:
-            if dgm is None or len(dgm) == 0:
-                return [0.0] * 6
-
-            dgm = np.asarray(dgm, dtype=np.float32)
-            finite_mask = np.isfinite(dgm[:, 0]) & np.isfinite(dgm[:, 1])
-            dgm = dgm[finite_mask]
-
-            if len(dgm) == 0:
-                return [0.0] * 6
-
-            births = dgm[:, 0]
-            deaths = dgm[:, 1]
-            pers = deaths - births
-            mids = 0.5 * (births + deaths)
-
-            return [
-                float(np.max(pers)),          # max persistence
-                float(np.mean(pers)),         # mean persistence
-                float(np.std(pers)),          # std persistence
-                float(np.mean(births)),       # mean birth
-                float(np.mean(deaths)),       # mean death
-                float(np.mean(mids)),         # mean midlife
-            ]
-
-        topo_feat = summarize_dgm(dgms[0]) + summarize_dgm(dgms[1])
-        topo_feature_pos.append(torch.tensor(topo_feat, dtype=torch.float32))
-
-    # Aggregate over all stimulation positions
-    topo_feature_pos = torch.stack(topo_feature_pos, dim=0).mean(dim=0)   # (12,)
-
-    if len(psf_feature_pos) > 0:
-        psf_feature_pos = torch.stack(psf_feature_pos, dim=0)  # (n_pos, 2, stim_level, n_classes)
-    else:
-        psf_feature_pos = torch.empty(0)
-
-    fv = {
-        "psf_feature_pos": psf_feature_pos,
-        "topo_feature_pos": topo_feature_pos,
-    }
-    return fv
+    pass
