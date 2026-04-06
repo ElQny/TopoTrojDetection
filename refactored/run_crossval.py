@@ -37,7 +37,13 @@ def xgb_crossval(p):
     auc = []
     crossEntropy = []
     xgb_list=[]
-    fold = 4
+    # fold = 4
+    fold = min(4, len(feature))
+    if fold < 2:
+        raise ValueError(
+            f"Need at least 2 training samples for cross-validation, got {len(feature)}."
+        )
+
     num_epochs=30
     fold_ind=0
 

@@ -40,6 +40,10 @@ INPUT_SIZE: List = [23,3,1024] # Input images' shape (default to be MNIST)
 INPUT_RANGE: List = [0, 255]   # Input image range
 TRAIN_TEST_SPLIT: float = 0.8  # Ratio of train to test
 
+NUMBER_OF_POINTS = 2048
+BATCH_SIZE = 3
+GRANULARITY = 4
+
 PC_ROOT: str = '/home/lisa/Desktop/Bac2_Program/modelnet40'
 IMPORT_PATH: str = '/home/lisa/Desktop/Bac2_Program/PCBA'
 
@@ -71,6 +75,10 @@ def main(args):
     psf_config['corr_method'] = CORR_METRIC
     psf_config['pc_root'] = PC_ROOT
     psf_config['device'] = device
+
+    psf_config['number_of_points'] = NUMBER_OF_POINTS
+    psf_config['granularity'] = GRANULARITY
+    psf_config['batch_size'] = BATCH_SIZE
 
     root = args.data_root
     model_list = sorted(os.listdir(root))
@@ -127,13 +135,30 @@ def main(args):
             gt = ('final_triggered_data_n_total' in model_config.keys()) #else check the json for filan_triggered_data_n_total
         gt_list.append(gt) #if that exists -> it is trojanized, else it is not trojanized -> append this to gt_list
 
-        img_c = None #!! Picture for pixel-wise peturbation is blank (default)
+        pointcloud_c = None #!! Picture for pixel-wise peturbation is blank (default)
         total_examples = 1 # Default to be a blank image if USE_EXAMPLE=False
-        # If use_examples then read in clean input example images
+        # If use_examples then read in clean input examples
+        # if USE_EXAMPLE and os.path.exists(model_train_example_config):
+        #     pointcloud_c = defaultdict(list)
+        #     example_file = pd.read_csv(model_train_example_config)
+        #     example_file.sample(frac=1)
+        #     n_classes = len(example_file['true_label'].unique())
+        #     for ind in range(example_file.shape[0]):
+        #         if example_file['triggered'].iloc[ind]:
+        #             continue
+        #         c = example_file['true_label'].iloc[ind]
+        #         if not len(pointcloud_c[c]):
+        #             img_file = \
+        #             glob.glob(os.path.join(root, model_name, '**', example_file['file'].iloc[ind]), recursive=True)[0]
+        #             img = torch.from_numpy(cv2.imread(img_file, cv2.IMREAD_UNCHANGED)).float()
+        #             pointcloud_c[c].append(img.permute(2, 0, 1).unsqueeze(0))
+        #         total_examples = sum([len(pointcloud_c[c]) for c in pointcloud_c])
+        #         if len(pointcloud_c.keys()) == n_classes and total_examples == n_classes:
+        #             break
 
         model_file_path_prefix = '/'.join(model_file_path.split('/')[:-1])
         save_file_path = os.path.join(model_file_path_prefix, 'test_extracted_psf_topo_feature.pkl')
-        fv = topo_psf_feature_extract(model, img_c, psf_config) #extract the features from the model -> TODO: change this since we are working with different features now!
+        fv = topo_psf_feature_extract(model, pointcloud_c, psf_config) #extract the features from the model -> TODO: change this since we are working with different features now!
         with open(save_file_path, 'wb') as f:
             pkl.dump(fv, f)
         f.close()
@@ -156,7 +181,7 @@ def main(args):
         # TOPO feature shape = N*12 where 12 is the total number of topological feature from dim0 and dim1
         topo_feature = torch.cat([fv_list[i]['topo_feature_pos'].unsqueeze(0) for i in range(len(fv_list))]) #collects all features from PSF
 
-        # topo_feature[np.where(topo_feature==np.Inf)]=1
+        topo_feature[np.where(topo_feature==np.Inf)]=1
         # n, _, nEx, fnW, fnH, nStim, C = psf_feature.shape
         # psf_feature_dat=psf_feature.reshape(n, 2, -1, nStim, C)
         # psf_diff_max=(psf_feature_dat.max(dim=3)[0]-psf_feature_dat.min(dim=3)[0]).max(2)[0].view(len(gt_list), -1)
@@ -164,13 +189,13 @@ def main(args):
         # psf_std_max=psf_feature_dat.std(dim=3).max(2)[0].view(len(gt_list), -1)
         # psf_topk_max=psf_feature_dat.topk(k=min(3, total_examples), dim=3)[0].mean(2).max(2)[0].view(len(gt_list), -1)
         # psf_feature_dat=torch.cat([psf_diff_max, psf_med_max, psf_std_max, psf_topk_max], dim=1)
-
+        #
         # dat=torch.cat([psf_feature_dat, topo_feature.view(topo_feature.shape[0], -1)], dim=1)
         dat = topo_feature.view(topo_feature.shape[0], -1) #collects all topological features
         dat=preprocessing.scale(dat)
         gt_list=torch.tensor(gt_list)
 
-# do train-test Split!
+        
         N = len(gt_list)
         n_train = int(TRAIN_TEST_SPLIT * N)
         ind_reshuffle = np.random.choice(list(range(N)), N, replace=False)
@@ -196,10 +221,10 @@ def main(args):
         y_pred = y_pred / len(best_model_list)
         T, b=best_model_list['threshold']
         y_pred=torch.sigmoid(b*(torch.tensor(y_pred)-T)).numpy()
+
         acc_test = np.sum((y_pred >= 0.5)==labels)/len(y_pred)
         auc_test = roc_auc_score(labels, y_pred)
         ce_test = np.sum(-(labels * np.log(y_pred) + (1 - labels) * np.log(1 - y_pred))) / len(y_pred)
-
 
     logger_name=date.today().strftime("%d-%m-%Y")+'_synthetic_'+"-".join([str(x) for x in psf_config['input_shape']])
     logger_file=os.path.join(args.log_path, logger_name)
