@@ -171,7 +171,7 @@ def generate_activation_vector_matrix(feature_dict_c: Dict) -> torch.Tensor:
     print("Generating activation vector matrix")
     neural_activation_matrix = []
     for k in feature_dict_c:
-        # todo: Conv1d ist (B, C, N) mit B==2 / B==3 etc.!!
+        #TODO: Conv1d is (B, C, N) with B==2 / B==3 etc.!!
         if len(feature_dict_c[k][0].shape) == 2:
             layer_act = [
                 feature_dict_c[k][i].max(1)[0].unsqueeze(1)
@@ -296,7 +296,7 @@ def topo_psf_feature_extract(model: torch.nn.Module, example_pointcloud: Dict, p
         neural_pd = build_neural_correlation_matrix(neural_act, method)  # Build neural correlation matrix (depending on correlation method)
         PH = build_persist_homology(PD_list, method, model, neural_pd, rips)   # Distance Matrix generation (D = 1-correlation) -> weights for correlation matrix!
         topo_feature = compute_topological_features(PH) # PH = persistent homology (basically persistence diagram)
-        topo_feature_pos[c_idx, :] = topo_feature
+        topo_feature_pos[c_idx, :] = topo_feature #overwrite where the feature is in the tensor (so topo_feature_pos stays at same size even with 0es)
 
     fv = {}
     fv['topo_feature_pos'] = topo_feature_pos

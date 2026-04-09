@@ -91,19 +91,19 @@ def perturb_points_in_cube(
         granularity:int
 ) -> np.array: #returns pointcloud with perturbed points
 
-    return pointcloud.copy() #for testing
-    # perturbed_pointcloud = pointcloud.copy()
-    # max_perturbation = calc_stepsize(granularity) / 10
-    #
-    # for point_index in points_in_subcube:
-    #     point = pointcloud[point_index]
-    #
-    #     for _ in range(10): #maximum of 10 tries for each point to be within box-bounds after perturbation
-    #         perturbed_point = perturb_point(point, max_perturbation)
-    #         if is_in_cube(perturbed_point, cube, granularity) and is_in_unit_sphere(perturbed_point):
-    #             perturbed_pointcloud[point_index] = perturbed_point
-    #             break
-    # return perturbed_pointcloud
+    # return pointcloud.copy() #comment in for testing and uncomment block below
+    perturbed_pointcloud = pointcloud.copy()
+    max_perturbation = calc_stepsize(granularity) / 10
+
+    for point_index in points_in_subcube:
+        point = pointcloud[point_index]
+
+        for _ in range(10): #maximum of 10 tries for each point to be within box-bounds after perturbation
+            perturbed_point = perturb_point(point, max_perturbation)
+            if is_in_cube(perturbed_point, cube, granularity) and is_in_unit_sphere(perturbed_point):
+                perturbed_pointcloud[point_index] = perturbed_point
+                break
+    return perturbed_pointcloud
 
 def transpose_and_batch_pointclouds_to_tensor(pointclouds: np.array) -> torch.FloatTensor:
     #(B, N, 3)->(B, 3, N)
