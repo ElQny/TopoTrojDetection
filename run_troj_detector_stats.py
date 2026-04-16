@@ -103,12 +103,14 @@ def main(
     psf_config['input_range'] = INPUT_RANGE
     psf_config['n_neuron'] = N_SAMPLE_NEURONS if n_neurons is None else n_neurons
     psf_config['corr_method'] = CORR_METRIC if corr_metric is None else corr_metric
-    psf_config['pc_root'] = args.pc_root
     psf_config['device'] = device
+
     #for Pointclouds:
-    psf_config['number_of_points'] = NUMBER_OF_POINTS if number_of_points is None else number_of_points
-    psf_config['granularity'] = GRANULARITY if granularity is None else granularity
-    psf_config['batch_size'] = BATCH_SIZE if batch_size is None else batch_size
+    if args.pointclouds==True:
+        psf_config['pc_root'] = args.pc_root
+        psf_config['number_of_points'] = NUMBER_OF_POINTS if number_of_points is None else number_of_points
+        psf_config['granularity'] = GRANULARITY if granularity is None else granularity
+        psf_config['batch_size'] = BATCH_SIZE if batch_size is None else batch_size
 
     root = args.data_root
     model_list = sorted(os.listdir(root))
@@ -120,9 +122,10 @@ def main(
         if not args.import_path:
             raise ValueError("import_path is required for Pointclouds!")
 
-    path_for_imports = str(Path(args.import_path).resolve())
-    sys.path.append(path_for_imports)  # imports the structure of the nn-Model from the model file (from where the pointcloud-neural-network was generated)
-    importlib.import_module("model")
+        path_for_imports = str(Path(args.import_path).resolve())
+        if path_for_imports not in sys.path:
+           sys.path.append(path_for_imports)  # imports the structure of the nn-Model from the model file (from where the pointcloud-neural-network was generated)
+        importlib.import_module("model")
 
     # --------------------------------- Step I: Feature Extraction ---------------------------------
     print(">>> Step I: Feature Extraction <<<")
@@ -153,8 +156,9 @@ def main(
         try:
             model_file_path = model_file_path
             model = torch.load(model_file_path).to(device)
-        except:
-            print("Model {} .pt file is missing, skip to next model".format(model_name))
+        except Exception as e: #expanded so exception is actually printed
+            print(f"Model {model_name} .pt file is missing, skip to next model")
+            print(f"Exception: {e}")
             continue
         model.eval()
 
@@ -396,7 +400,7 @@ if __name__ == '__main__':
     parser.add_argument('--log_path', type=str, help='Output log save dir', default='./tmp')
     parser.add_argument('--gpu_ind', type=str, help='Indices of GPUs to be used', default='0')
     parser.add_argument('--seed', type=int, help="Experiment random seed", default=123)
-    parser.add_argument('--pointclouds', action=argparse.BooleanOptionalAction, help='Use pointcloud data', default=False) #https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
+    parser.add_argument('--pointclouds', action='store_true', help='Use pointcloud data') #https://docs.python.org/3/library/argparse.html - on/off flag
     parser.add_argument('--pc_root', type=str, help="Root folder to the pointcloud models")
     parser.add_argument('--import_path', type=str, help="Import path for the pointcloud model")
     args = parser.parse_args()
@@ -411,5 +415,5 @@ if __name__ == '__main__':
     # calc_log_values(corr_metrics, "CORR_METRIC", "corr_metric", 10, args.log_path)
 
     #NORMAL OUTPUT:
-    acc_test, auc_test, ce_test = main(args)
-    print(f"ACC: {acc_test}, AUC: {auc_test}, CE: {ce_test}")
+    # acc_test, auc_test, ce_test = main(args)
+    # print(f"ACC: {acc_test}, AUC: {auc_test}, CE: {ce_test}")
