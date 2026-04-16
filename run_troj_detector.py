@@ -23,6 +23,7 @@ import pickle as pkl
 from datetime import date
 from tqdm import tqdm
 import glob
+import matplotlib.pyplot as plt
 
 from topological_feature_extractor import topo_psf_feature_extract
 from run_crossval import run_crossval_xgb, run_crossval_mlp
@@ -41,7 +42,7 @@ INPUT_RANGE: List = [0, 255]   # Input image range
 TRAIN_TEST_SPLIT: float = 0.8  # Ratio of train to test
 
 
-def main(args):
+def main(args, patch_size=None, stim_level=None, step_size=None):
 
     seed = args.seed
     random.seed(seed)
@@ -55,9 +56,9 @@ def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     psf_config = {}
-    psf_config['step_size'] = STEP_SIZE
-    psf_config['stim_level'] = STIM_LEVEL
-    psf_config['patch_size'] = PATCH_SIZE
+    psf_config['step_size'] = STEP_SIZE if step_size is None else step_size
+    psf_config['stim_level'] = STIM_LEVEL if stim_level is None else stim_level
+    psf_config['patch_size'] = PATCH_SIZE if patch_size is None else patch_size
     psf_config['input_shape'] = INPUT_SIZE
     psf_config['input_range'] = INPUT_RANGE
     psf_config['n_neuron'] = N_SAMPLE_NEURONS
@@ -170,7 +171,7 @@ def main(args):
         psf_feature_dat=torch.cat([psf_diff_max, psf_med_max, psf_std_max, psf_topk_max], dim=1)
 
         dat=torch.cat([psf_feature_dat, topo_feature.view(topo_feature.shape[0], -1)], dim=1)
-        # dat = topo_feature.view(topo_feature.shape[0], -1)
+        #dat = topo_feature.view(topo_feature.shape[0], -1)
         dat=preprocessing.scale(dat)
         gt_list=torch.tensor(gt_list)
 

@@ -151,7 +151,7 @@ def topo_psf_feature_extract(model: torch.nn.Module, example_dict: Dict, psf_con
     step_size=psf_config['step_size']
     stim_level=psf_config['stim_level']
     patch_size=psf_config['patch_size']
-    input_shape=psf_config['input_shape'] #TODO
+    input_shape=psf_config['input_shape']
     input_valuerange=psf_config['input_range']
     n_neuron_sample=psf_config['n_neuron']
     method=psf_config['corr_method']

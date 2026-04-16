@@ -24,21 +24,21 @@ from datetime import date
 from tqdm import tqdm
 import glob
 
-from topological_feature_extractor import topo_psf_feature_extract
+from topological_feature_extractor_pc import topo_psf_feature_extract
 from run_crossval import run_crossval_xgb, run_crossval_mlp
 
 # Algorithm Configuration
-STEP_SIZE:  int = 2 # Stimulation stepsize used in PSF
-PATCH_SIZE: int = 2 # Stimulation patch size used in PSF
-STIM_LEVEL: int = 4 # Number of stimulation level used in PSF
+STEP_SIZE:  int = 2 # Stimulation stepsize used in PSF -> 2
+PATCH_SIZE: int = 2 # Stimulation patch size used in PSF -> 2
+STIM_LEVEL: int = 5 # Number of stimulation level used in PSF -> 5
 N_SAMPLE_NEURONS: int = 1.5e3  # Number of neurons for sampling
 USE_EXAMPLE: bool =  False     # Whether clean inputs will be given or not
-CORR_METRIC: str = 'distcorr'   # Correlation metric to be used
-CLASSIFIER: str  = 'xgboost'    # Classifier for the detection , choice = {xgboost, mlp}.
+CORR_METRIC: str = 'distcorr'   # Correlation metric to be used -> distcorr
+CLASSIFIER: str  = 'xgboost'    # Classifier for the detection , choice = {xgboost, mlp}. -> xgboost
 # Experiment Configuration
 INPUT_SIZE: List = [23,3,1024] # Input images' shape (default to be MNIST)
 INPUT_RANGE: List = [0, 255]   # Input image range
-TRAIN_TEST_SPLIT: float = 0.8  # Ratio of train to test
+TRAIN_TEST_SPLIT: float = 0.8  # Ratio of train to test -> 0.8
 
 NUMBER_OF_POINTS = 2048
 BATCH_SIZE = 3
@@ -158,7 +158,7 @@ def main(args):
 
         model_file_path_prefix = '/'.join(model_file_path.split('/')[:-1])
         save_file_path = os.path.join(model_file_path_prefix, 'test_extracted_psf_topo_feature.pkl')
-        fv = topo_psf_feature_extract(model, pointcloud_c, psf_config) #extract the features from the model -> TODO: change this since we are working with different features now!
+        fv = topo_psf_feature_extract(model, pointcloud_c, psf_config) #extract the features from the model
         with open(save_file_path, 'wb') as f:
             pkl.dump(fv, f)
         f.close()
@@ -183,15 +183,20 @@ def main(args):
 
         topo_feature[np.where(topo_feature==np.Inf)]=1
         # n, _, nEx, fnW, fnH, nStim, C = psf_feature.shape
-        # psf_feature_dat=psf_feature.reshape(n, 2, -1, nStim, C)
-        # psf_diff_max=(psf_feature_dat.max(dim=3)[0]-psf_feature_dat.min(dim=3)[0]).max(2)[0].view(len(gt_list), -1)
-        # psf_med_max=psf_feature_dat.median(dim=3)[0].max(2)[0].view(len(gt_list), -1)
-        # psf_std_max=psf_feature_dat.std(dim=3).max(2)[0].view(len(gt_list), -1)
-        # psf_topk_max=psf_feature_dat.topk(k=min(3, total_examples), dim=3)[0].mean(2).max(2)[0].view(len(gt_list), -1)
-        # psf_feature_dat=torch.cat([psf_diff_max, psf_med_max, psf_std_max, psf_topk_max], dim=1)
-        #
-        # dat=torch.cat([psf_feature_dat, topo_feature.view(topo_feature.shape[0], -1)], dim=1)
-        dat = topo_feature.view(topo_feature.shape[0], -1) #collects all topological features
+        for i in range (len(fv_list)):
+            fv_list[i] = fv_list[i]['psf_feature_pos'].unsqueeze(0)
+        psf_feature = torch.cat (fv_list)
+        n, _, nEx, nCubes, nPerturb, C = psf_feature.shape
+        psf_feature_dat = psf_feature.reshape(n, 2, -1, nPerturb, C)
+
+        psf_diff_max=(psf_feature_dat.max(dim=3)[0]-psf_feature_dat.min(dim=3)[0]).max(2)[0].view(len(gt_list), -1)
+        psf_med_max=psf_feature_dat.median(dim=3)[0].max(2)[0].view(len(gt_list), -1)
+        psf_std_max=psf_feature_dat.std(dim=3).max(2)[0].view(len(gt_list), -1)
+        psf_topk_max=psf_feature_dat.topk(k=min(3, nPerturb), dim=3)[0].mean(2).max(2)[0].view(len(gt_list), -1)
+        psf_feature_dat=torch.cat([psf_diff_max, psf_med_max, psf_std_max, psf_topk_max], dim=1)
+
+        dat=torch.cat([psf_feature_dat, topo_feature.view(topo_feature.shape[0], -1)], dim=1)
+        #dat = topo_feature.view(topo_feature.shape[0], -1) #collects all topological features
         dat=preprocessing.scale(dat)
         gt_list=torch.tensor(gt_list)
 
@@ -218,9 +223,15 @@ def main(args):
             weight=best_model_list['weight'][i]/sum(best_model_list['weight'])
             y_pred += best_bst.predict(dtest)*weight
 
-        y_pred = y_pred / len(best_model_list)
+        #debug-Ausgaben:
+        print("labels: ", labels)
+        print("y_pred before: ", y_pred)
+
+        # y_pred = y_pred / len(best_model_list)
         T, b=best_model_list['threshold']
+        print("T:", T, "b:",b)
         y_pred=torch.sigmoid(b*(torch.tensor(y_pred)-T)).numpy()
+        print("y_pred afterwards: ", y_pred)
 
         acc_test = np.sum((y_pred >= 0.5)==labels)/len(y_pred)
         auc_test = roc_auc_score(labels, y_pred)
