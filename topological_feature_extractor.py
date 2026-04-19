@@ -241,7 +241,7 @@ def topo_psf_feature_extract(model: torch.nn.Module, example_dict: Dict, psf_con
                     layer_act=(layer_act-layer_act.mean(1, keepdim=True))/(layer_act.std(1, keepdim=True)+1e-30)
                     neural_act.append(layer_act)
                 neural_act=torch.cat(neural_act)
-                layer_list=parse_arch(model)
+                layer_list, _ =parse_arch(model)
                 sample_n_neurons_list=None
                 if len(neural_act)>1.5e3:
                     neural_act, sample_n_neurons_list=sample_act(neural_act, layer_list, sample_size=n_neuron_sample)

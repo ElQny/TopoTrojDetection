@@ -31,6 +31,8 @@ import importlib
 from pathlib import Path
 from topological_feature_extractor import topo_psf_feature_extract
 from topological_feature_extractor_pc import topo_psf_feature_extract_pc #for Pointclouds
+from topological_feature_extractor_sphere import topo_psf_feature_extract_sphere #for spheres
+from pointcloud_helper import load_off_file
 
 from run_crossval import run_crossval_xgb, run_crossval_mlp
 
@@ -56,14 +58,23 @@ NUMBER_OF_POINTS = 2048
 BATCH_SIZE = 3
 GRANULARITY = 4
 
+# spheres:
+CENTER_STEP = 1.0
+RADIUS_STEP = 0.1
+RADIUS_MIN = 0.1
+RADIUS_MAX = 0.3
+N_POINTS_TRIGGER = 32
+
+#rounding:
+ROUND_DECIMALS = 1
 
 
 def append_to_csv(filename:str, fieldnames:list, row:dict):
     try:
-        if not os.pathname.dirname(filename):
-            raise IOError(f"Directory {os.pathname.dirname(filename)} does not exist")
-        with open(filename, 'a', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        if not os.path.dirname(filename):
+            raise IOError(f"Directory {os.path.dirname(filename)} does not exist")
+        with open(filename, 'a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
             # if file doesn't exist yet: create with header
             if os.path.getsize(filename) == 0:
                 print(f"Creating file {filename}")
@@ -111,6 +122,14 @@ def main(
         psf_config['number_of_points'] = NUMBER_OF_POINTS if number_of_points is None else number_of_points
         psf_config['granularity'] = GRANULARITY if granularity is None else granularity
         psf_config['batch_size'] = BATCH_SIZE if batch_size is None else batch_size
+        #for spheres-path:
+        psf_config['center_step'] = CENTER_STEP
+        psf_config['radius_step'] = RADIUS_STEP
+        psf_config['radius_min'] = RADIUS_MIN
+        psf_config['radius_max'] = RADIUS_MAX
+        psf_config['number_of_points_trigger'] = N_POINTS_TRIGGER
+        #for rounding:
+        psf_config['round_decimals'] = ROUND_DECIMALS
 
     root = args.data_root
     model_list = sorted(os.listdir(root))
@@ -179,7 +198,7 @@ def main(
         img_c = None
         total_examples = 1 # Default to be a blank image if USE_EXAMPLE=False
         # If use_examples then read in clean input example images
-        # TODO: This path is not yet implemented for pointclouds!
+        # TODO: This path is not implemented for pointclouds!
         if USE_EXAMPLE and os.path.exists(model_train_example_config):
             if args.pointclouds == True:
                 raise ValueError("Example not implemented for Pointclouds")
@@ -202,7 +221,12 @@ def main(
         model_file_path_prefix = '/'.join(model_file_path.split('/')[:-1])
         save_file_path = os.path.join(model_file_path_prefix, 'test_extracted_psf_topo_feature.pkl')
         if args.pointclouds == True:
-            fv = topo_psf_feature_extract_pc(model, img_c, psf_config)
+            if args.clean_pc_path:
+                clean_pc = load_off_file(args.clean_pc_path)
+            else:
+                clean_pc = None
+            #fv = topo_psf_feature_extract_sphere(model, clean_pc, psf_config) #spheres
+            fv = topo_psf_feature_extract_pc(model, clean_pc, psf_config) # random pointclouds
         else:
             fv = topo_psf_feature_extract(model, img_c, psf_config)
         with open(save_file_path, 'wb') as f:
@@ -357,8 +381,6 @@ def main(
         auc_test = roc_auc_score(gt_test.detach().cpu().numpy(), score[:, 1].numpy())
         ce_test = -np.mean(np.array(gt_test)*np.log(np.maximum(score[:,1].numpy(), 1e-4))+(1-np.array(gt_test))*np.log(np.maximum(1-score[:,1].numpy(), 1e-4)))
 
-    else:
-        print("Classifier mlp not implemented for pointclouds")
 
     print("Final Acc {:.3f}% - Final AUC {:.3f} - Fianl CE {:.3f}".format(acc_test*100, auc_test, ce_test))
     # logger-ausgaben entfernt da csv-logging
@@ -392,7 +414,6 @@ def calc_log_values(value_range:list, label:str, param_name:str, runs: int, log_
                 }
             )
 
-
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Extract feature and train trojan detector for synthetic experiment')
@@ -403,6 +424,7 @@ if __name__ == '__main__':
     parser.add_argument('--pointclouds', action='store_true', help='Use pointcloud data') #https://docs.python.org/3/library/argparse.html - on/off flag
     parser.add_argument('--pc_root', type=str, help="Root folder to the pointcloud models")
     parser.add_argument('--import_path', type=str, help="Import path for the pointcloud model")
+    parser.add_argument('--clean_pc_path', type=str, help='Path to clean pointcloud as OFF file')
     args = parser.parse_args()
 
     value_range_std = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -415,5 +437,5 @@ if __name__ == '__main__':
     # calc_log_values(corr_metrics, "CORR_METRIC", "corr_metric", 10, args.log_path)
 
     #NORMAL OUTPUT:
-    # acc_test, auc_test, ce_test = main(args)
-    # print(f"ACC: {acc_test}, AUC: {auc_test}, CE: {ce_test}")
+    acc_test, auc_test, ce_test = main(args)
+    print(f"ACC: {acc_test}, AUC: {auc_test}, CE: {ce_test}")

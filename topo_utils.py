@@ -38,7 +38,7 @@ def parse_arch(model: torch.tensor) -> Tuple[List, List]:
             sub_layer_list, sub_layer_k = parse_arch(model._modules[k])
             layer_list += sub_layer_list
             layer_k += [k + '_' + x for x in sub_layer_k]
-        elif isinstance(model._modules[k], torch.nn.Conv1d) or isinstance(model._modules[k], torch.nn.Linear):
+        elif isinstance(model._modules[k], torch.nn.Conv1d) or isinstance(model._modules[k], torch.nn.Conv2d) or isinstance(model._modules[k], torch.nn.Linear):
             layer_list.append(model._modules[k])
             layer_k.append(model._modules[k]._get_name())
     return layer_list, layer_k
@@ -69,7 +69,8 @@ def feature_collect(model: torch.tensor, images: torch.tensor) -> Tuple[Dict, to
     # Keep registration handle to remove registration later
     for layer_ind in range(len(module_list)):
         handle_list.append(module_list[layer_ind].register_forward_hook(hook=feature_hook))
-    output = model(images)
+    with torch.no_grad(): #CPU saving TODO: change back!
+        output = model(images)
     for layer_ind in range(len(module_list)):
         #  if layer_ind in layer_select:
         feature_dict[(layer_ind, module_k[layer_ind])] = outs[layer_ind]
@@ -85,8 +86,8 @@ def sample_act(neural_act: torch.tensor, layer_list: List, sample_size: int) -> 
         layer_list (List): a list contain Conv2d or Linear module of a network. it is the return of parse_arch
         sample_size (int): Interger that specifies the number of neurons to be sampled
     """
-    conv_nfilters_list = [x.in_channels for x in layer_list[0] if hasattr(x, "in_channels")]
-    linear_nneurons_list = [x.in_features for x in layer_list[0] if hasattr(x, "in_features")]
+    conv_nfilters_list = [x.in_channels for x in layer_list if hasattr(x, "in_channels")]
+    linear_nneurons_list = [x.in_features for x in layer_list if hasattr(x, "in_features")]
     n_neurons_list = conv_nfilters_list + linear_nneurons_list
     layer_sample_num = [int(sample_size * x / sum(n_neurons_list)) for x in n_neurons_list]
     n_neurons_list = list(np.cumsum(n_neurons_list))
@@ -103,8 +104,8 @@ def sample_act(neural_act: torch.tensor, layer_list: List, sample_size: int) -> 
 def process_pd(pd: torch.tensor, layer_list: List, sample_n_neurons_list: List = None) -> torch.tensor:
     if not sample_n_neurons_list:
         # If the target sampling neurons list is not given then set it to be the whole layer_list
-        conv_nfilters_list = [x.in_channels for x in layer_list[0] if hasattr(x, "in_channels")]
-        linear_nneurons_list = [x.in_features for x in layer_list[0] if hasattr(x, "in_features")]
+        conv_nfilters_list = [x.in_channels for x in layer_list if hasattr(x, "in_channels")]
+        linear_nneurons_list = [x.in_features for x in layer_list if hasattr(x, "in_features")]
         n_neurons_list = conv_nfilters_list + linear_nneurons_list
         n_neurons_list = [0] + list(np.cumsum(n_neurons_list))
     else:

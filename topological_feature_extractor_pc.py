@@ -19,36 +19,20 @@ from pointcloud_helper import *
 
 def read_pointcloud_psf_config(psf_config: Dict):
     # reads out parameters from psf_config (dictionary)
-    n_neuron_sample = psf_config['n_neuron']
-    method = psf_config['corr_method']
-    device = psf_config['device']
     number_of_points = psf_config['number_of_points']
     granularity = psf_config['granularity']
     batch_size = psf_config['batch_size']
-    return n_neuron_sample, method, device, number_of_points, granularity, batch_size
-
-
-def generate_perturbed_pointcloud_batch(batch_size, c_idx: int, cubes, device, example_pointcloud, granularity, points_in_cube) -> torch.Tensor:
-    print("Generating perturbed pointcloud batch")
-    perturbed_pointclouds = []
-    for b in range(batch_size):
-        temp_perturbed_pc = perturb_points_in_cube(
-            pointcloud=example_pointcloud,
-            points_in_subcube=points_in_cube,
-            cube=cubes[c_idx],
-            granularity=granularity,
-        )
-        perturbed_pointclouds.append(temp_perturbed_pc)
-
-    perturbed_pointclouds = np.array(perturbed_pointclouds)
-    tensor = transpose_and_batch_pointclouds_to_tensor(perturbed_pointclouds).to(device)
-    return tensor
+    n_neuron_sample = psf_config['n_neuron']
+    method = psf_config['corr_method']
+    device = psf_config['device']
+    round_decimals = psf_config.get('round_decimals', None) #optional parameter
+    return n_neuron_sample, method, device, number_of_points, granularity, batch_size, round_decimals
 
 def generate_activation_vector_matrix(feature_dict_c: Dict) -> torch.Tensor:
     print("Generating activation vector matrix")
     neural_activation_matrix = []
     for k in feature_dict_c:
-        #TODO: Conv1d is (B, C, N) with B==2 / B==3 etc.!!
+        #Conv1d is (B, C, N) with B==2 / B==3 etc.!!
         if len(feature_dict_c[k][0].shape) == 2:
             layer_act = [
                 feature_dict_c[k][i].max(1)[0].unsqueeze(1)
@@ -93,7 +77,7 @@ def build_persist_homology(PD_list, method, model: torch.nn.Module, neural_pd, r
         if method != 'bc' \
         else -np.log(neural_pd.detach().cpu().numpy() + 1e-6)
     PD_list.append(neural_pd.detach().cpu().numpy())
-    if model._get_name() == 'ModdedLeNet5Net':
+    if model._get_name == 'ModdedLeNet5Net':
         PH = rips.fit_transform(D, distance_matrix=True)  # directly calling ripser
     else:
         lambdas = getGreedyPerm(D)  # furthest-point-sampling
@@ -133,7 +117,13 @@ def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Dict
         - vectors are turned into topological features
     """
 
-    n_neuron_sample, method, device, number_of_points, granularity, batch_size = read_pointcloud_psf_config(psf_config)
+    (n_neuron_sample,
+     method,
+     device,
+     number_of_points,
+     granularity,
+     batch_size,
+     round_decimals) = read_pointcloud_psf_config(psf_config)
 
     #if no input example is given, use random pointcloud instead:
     if example_pointcloud is None:
@@ -186,8 +176,14 @@ def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Dict
         if len(points_in_cube) == 0: #skip empty cubes
             continue
         tensor = generate_perturbed_pointcloud_batch(
-            batch_size, c_idx, cubes, device, example_pointcloud, granularity,
-                                                     points_in_cube)
+            batch_size = batch_size,
+            c_idx = c_idx,
+            cubes = cubes,
+            device = device,
+            example_pointcloud=example_pointcloud,
+            granularity=granularity,
+            points_in_cube=points_in_cube,
+            round_decimals=round_decimals)
         feature_dict_c, output = feature_collect(model, tensor) #returns hooked activations and model output
         if isinstance(output, tuple):
             output = output[0]
