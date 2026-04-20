@@ -41,7 +41,7 @@ STEP_SIZE:  int = 2 # Stimulation stepsize used in PSF
 PATCH_SIZE: int = 2 # Stimulation patch size used in PSF
 STIM_LEVEL: int = 5 # Number of stimulation level used in PSF
 
-FILTRATION_METHOD: str='alpha' #vr (Vietoris-Rips) or alpha
+FILTRATION_METHOD: str='vr' #vr (Vietoris-Rips) or alpha
 N_SAMPLE_NEURONS: int = 1500  # Number of neurons for sampling
 USE_EXAMPLE: bool =  False     # Whether clean inputs will be given or not
 CORR_METRIC: str = 'distcorr'   # Correlation metric to be used
@@ -56,15 +56,15 @@ TRAIN_TEST_SPLIT: float = 0.8  # Ratio of train to test
 
 # Pointcloud-specific:
 NUMBER_OF_POINTS = 2048
-BATCH_SIZE = 3
+BATCH_SIZE = 16
 GRANULARITY = 4
 
 # spheres:
-CENTER_STEP = 1
-RADIUS_STEP = 0.1
-RADIUS_MIN = 0.2
-RADIUS_MAX = 0.5
-N_POINTS_TRIGGER = 8
+CENTER_STEP = 0.2
+RADIUS_STEP = 0.05
+RADIUS_MIN = 0.05
+RADIUS_MAX = 0.3
+N_POINTS_TRIGGER = 64
 
 #rounding:
 ROUND_DECIMALS = 1
@@ -380,7 +380,7 @@ def main(
         print("Final Acc {:.3f}% - Final AUC {:.3f} - Fianl CE {:.3f}".format(acc_test * 100, auc_test, ce_test))
         #logger-ausgaben entfernt da csv-logging
 
-    #TODO: für Pointclouds nicht implementiert
+    #für Pointclouds/Spheres nicht implementiert
     if CLASSIFIER=='mlp':
         if not args.mode == 'img':
             raise ValueError("Classifier mlp not implemented for pointclouds")

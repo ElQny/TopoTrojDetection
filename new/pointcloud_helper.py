@@ -2,18 +2,57 @@ import random
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+import pandas as pd
+import plotly.express as px
+from matplotlib.pyplot import title
+import open3d as o3d
+
+BASE_FORM = '../base_forms/square.off'
 
 def plot_pointcloud(pointcloud: np.array, title: str):
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+    df = pd.DataFrame(pointcloud, columns = ['x', 'y', 'z'])
+    fig = px.scatter_3d(
+        df,
+        x='x',
+        y='y',
+        z='z',
+        title = title,
+    )
+    fig.update_traces(marker=dict(size=2))  # markersize smaller
+    fig.show()
 
-    x = pointcloud[:, 0]
-    y = pointcloud[:, 1]
-    z = pointcloud[:, 2]
+def plot_pointcloud_layers(pointcloud:np.array, layers: np.array, layer_names: np.array, title:str):
+    df = pd.DataFrame(pointcloud, columns = ['x', 'y', 'z'])
+    df['layer_id'] = layers
+    df['layer_name'] = layer_names
+    df['layer_description'] = df['layer_id'].astype(str) + ': ' + df['layer_name'].astype(str)
 
-    ax.scatter(x, y, z)
-    ax.set_title(title)
-    plt.show()
+    fig = px.scatter_3d(
+        df,
+        x = 'x',
+        y = 'y',
+        z = 'z',
+        color = 'layer_description',
+        title = title,
+    )
+
+    fig.update_traces(
+        marker=dict(size=2),#markersize smaller
+    )
+    fig.show()
+
+#from: https://github.com/zhenxianglance/PCBA/blob/main/attack_visialization.py
+def plot_pointcloud_trigger(points_clean:np.array, points_backdoor:np.array):
+    pcd1 = o3d.geometry.PointCloud()
+    pcd1.points = o3d.utility.Vector3dVector(points_clean)
+    pcd1.paint_uniform_color(np.array([0.1, 0.1, 0.8]))
+    pcd2 = o3d.geometry.PointCloud()
+    pcd2.points = o3d.utility.Vector3dVector(points_backdoor)
+    pcd2.paint_uniform_color(np.array([0.8, 0.1, 0.1]))
+    # Attack
+    o3d.visualization.draw_geometries([pcd1, pcd2])
+    # Clean
+    o3d.visualization.draw_geometries([pcd1])
 
 #src: https://github.com/zhenxianglance/PCBA/blob/main/dataset/dataset.py
 def center_and_scale(points: np.array) -> np.array:
@@ -171,8 +210,9 @@ def generate_perturbed_pointcloud_batch(batch_size, c_idx: int, cubes, device, e
             granularity=granularity,
             decimal_positions=round_decimals
         )
+        plot_pointcloud(temp_perturbed_pc, 'Perturbed pointcloud')
         perturbed_pointclouds.append(temp_perturbed_pc)
-
+    #     perturbed_pointclouds.append(example_pointcloud) #for testing
     perturbed_pointclouds = np.array(perturbed_pointclouds)
     tensor = transpose_and_batch_pointclouds_to_tensor(perturbed_pointclouds).to(device)
     return tensor
@@ -207,7 +247,8 @@ def generate_spheres_from_center(step: float, radius, npoints:int):
     centers=possible_sphere_centers(step)
 
     for center in centers: #generates a sphere for each possible center
-        pointcloud = generate_pcba_sphere_from_center(center, radius, npoints)
+        trigger = scale_trigger_to_radius(center, radius, npoints)
+        pointcloud = generate_pcba_sphere_from_centergener(center, radius, npoints)
         pointclouds.append(pointcloud)
         # information.append({
         #     "radius": radius,
@@ -216,6 +257,22 @@ def generate_spheres_from_center(step: float, radius, npoints:int):
     pointclouds = np.array(pointclouds)
     # return pointclouds, information
     return pointclouds
+
+def scale_trigger_to_radius(trigger: np.array, center, radius:int, number_of_points:int) -> np.array:
+    print(f"Scaling the trigger to radius {radius} and center {center}")
+
+    center = np.array(center)
+    if (trigger.shape[0] > number_of_points): #reduce to number of points
+        indices = np.random.choice(trigger.shape[0], number_of_points, replace=False)
+        trigger = trigger[indices]
+
+    points = trigger - np.mean(trigger, axis=0, keepdims=True) # center trigger
+
+    dist = np.max(np.sqrt(np.sum(points ** 2, axis=1)), 0)
+    points = (points * radius) / dist
+
+    points = points + center
+    return points
 
 def generate_radius_batch(
         clean_pointcloud: np.array,
@@ -229,13 +286,16 @@ def generate_radius_batch(
     pointclouds = []
     radii = np.arange(radius_min, radius_max + 1e-10, radius_step) #adding +1e-10 so the upper border is included
 
-    for radius in radii:
-        trigger = generate_pcba_sphere_from_center(center, radius, number_of_points_trigger)
+    for radius in radii: #generate Batch
+        trigger = load_off_file(BASE_FORM)
+        trigger = scale_trigger_to_radius(trigger, center, radius, number_of_points_trigger)
         overlay = overlay_trigger_on_pointcloud(clean_pointcloud, trigger)
         pointclouds.append(overlay)
+        # plot_pointcloud_trigger(clean_pointcloud, trigger) #for plots
+        # pointclouds.append(clean_pointcloud) #for testing
 
     pointclouds = np.array(pointclouds)
-    tensor = transpose_and_batch_pointclouds_to_tensor(pointclouds) # (radiuscount, pointcount, 3) -> (radiuscount, 3, pointcount)
+    tensor = transpose_and_batch_pointclouds_to_tensor(pointclouds) # (B(radiusbatch), N(pointcount), 3) -> (B, 3, N)
     return tensor, radii
 
 

@@ -119,14 +119,27 @@ def topo_psf_feature_extract_img(model: torch.nn.Module, example_dict: Dict, psf
                 psf_feature_pos[0, c, feature_w_pos, feature_h_pos]=psf_score
                 psf_feature_pos[1, c, feature_w_pos, feature_h_pos]=psf_conf
 
-                # Extract intermediate activating vectors
-                neural_act = generate_activation_vector_matrix(feature_dict_c)
                 layer_list, _ =parse_arch(model)
                 sample_n_neurons_list=None
+
+                # Extract intermediate activating vectors
+                neural_act, layer_ids, layer_names = generate_activation_vector_matrix(feature_dict_c)
+
                 if len(neural_act)>1.5e3:
-                    neural_act, sample_n_neurons_list=sample_act(neural_act, layer_list, sample_size=n_neuron_sample)
+                    neural_act, sample_n_neurons_list, sample_indices=sample_act(neural_act, layer_list, sample_size=n_neuron_sample)
+                    layer_ids = layer_ids[sample_indices]
+                    layer_names = layer_names[sample_indices]
+
                 neural_pd = build_neural_correlation_matrix(neural_act, method = method)
-                topo_feature = topo_feature_from_corr_matrix(PD_list=PD_list, method=method, neural_pd=neural_pd, model = model , rips = rips, filtration_method = filtration_method);
+                topo_feature = topo_feature_from_corr_matrix(PD_list=PD_list,
+                                                             method=method,
+                                                             neural_pd=neural_pd,
+                                                             model = model ,
+                                                             rips = rips,
+                                                             filtration_method = filtration_method,
+                                                             layer_ids = layer_ids,
+                                                             layer_names = layer_names)
+
                 topo_feature_pos[c, int(feature_w_pos*feature_map_w+feature_h_pos), :]=topo_feature
                 feature_h_pos+=1
             feature_w_pos+=1
@@ -136,4 +149,3 @@ def topo_psf_feature_extract_img(model: torch.nn.Module, example_dict: Dict, psf
     fv['topo_feature_pos']=topo_feature_pos
     fv['correlation_matrix']=np.vstack([x[None, :, :] for x in PD_list]).mean(0)
     return fv
-

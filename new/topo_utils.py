@@ -104,7 +104,7 @@ def sample_act(neural_act: torch.tensor, layer_list: List, sample_size: int) -> 
     sample_n_neurons_list = [len(x) for x in sample_ind]
     sample_ind = np.concatenate(sample_ind)
 
-    return neural_act[sample_ind], sample_n_neurons_list
+    return neural_act[sample_ind], sample_n_neurons_list, sample_ind #returns indices of kept rows
 
 
 def process_pd(pd: torch.tensor, layer_list: List, sample_n_neurons_list: List = None) -> torch.tensor:

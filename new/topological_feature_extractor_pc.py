@@ -63,10 +63,12 @@ def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Opti
     #if no input example is given, use random pointcloud instead:
     if example_pointcloud is None:
         example_pointcloud = create_sample_pointcloud(number_of_points)
+    else:
+        example_pointcloud = np.array(example_pointcloud)
     example_pointcloud = center_and_scale(example_pointcloud)
 
     model = model.to(device)
-    model.eval() #TODO
+    model.eval() # necessary for certain layers https://stackoverflow.com/questions/60018578/what-does-model-eval-do-in-pytorch
 
     cubes = generate_cubes(granularity)
     sub_pointclouds = choose_sub_pointclouds(
@@ -74,26 +76,22 @@ def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Opti
         granularity=granularity
     )
 
-    topo_feature_pos = torch.zeros(  #fixed size in zeroes
+    test_in = transpose_and_batch_pointclouds_to_tensor(
+        np.array([example_pointcloud])
+    ) #test_in = (B, 3, N)
+    test_in = test_in.to(device)
+    with torch.no_grad():  # reduce memory consumption (no Tensor.backward() calls here) https://docs.pytorch.org/docs/stable/generated/torch.no_grad.html
+        test_out = model(test_in)
+
+    if isinstance(test_out, tuple):
+        test_out = test_out[0]
+    num_classes = int(test_out.shape[1])
+
+    topo_feature_pos = torch.zeros(  # fixed size in zeroes
         len(cubes),
         12,
         dtype=torch.float32
     )
-
-    # cube-wise perturbation strategy:
-    PD_list=[]
-    rips = Rips(verbose=False)
-    model = model.to(device)
-    layer_list, _ = parse_arch(model)
-
-    test_input = transpose_and_batch_pointclouds_to_tensor(
-        np.array([example_pointcloud])
-    ).to(device)
-
-    test_out = model(test_input)
-    if isinstance(test_out, tuple):
-        test_out = test_out[0]
-    num_classes = int(test_out.shape[1])
 
     psf_feature_pos = torch.zeros(
         2,  # score + confidence
@@ -104,11 +102,17 @@ def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Opti
         dtype=torch.float32
     )
 
+    # cube-wise perturbation strategy:
+    PD_list=[]
+    rips = Rips(verbose=False)
+    model = model.to(device)
+
     for c_idx in range(len(cubes)):
         print("Cube #", c_idx, ":")
         points_in_cube = sub_pointclouds[c_idx]
         if len(points_in_cube) == 0: #skip empty cubes
             continue
+
         tensor = generate_perturbed_pointcloud_batch(
             batch_size = batch_size,
             c_idx = c_idx,
@@ -118,23 +122,38 @@ def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Opti
             granularity=granularity,
             points_in_cube=points_in_cube,
             round_decimals=round_decimals)
+        tensor = tensor.to(device) #needs to be on same device as model for feature_collect
+
         feature_dict_c, output = feature_collect(model, tensor) #returns hooked activations and model output
         if isinstance(output, tuple):
             output = output[0]
+
         psf_score = output.detach().cpu()
         psf_conf = torch.softmax(psf_score, dim=1)
 
         psf_feature_pos[0,0,c_idx, :, :] = psf_score
         psf_feature_pos[1,0,c_idx, :,:] = psf_conf
 
-        neural_act = generate_activation_vector_matrix(feature_dict_c)  # hook-features -> neural activation matrix
+        layer_list, _ = parse_arch(model)
+        sample_n_neurons_list = None
+
+        neural_act, layer_ids, layer_names = generate_activation_vector_matrix(feature_dict_c)  # hook-features -> neural activation matrix
 
         if len(neural_act) > 1.5e3:
-            neural_act, sample_n_neurons_list = sample_act(neural_act, layer_list, sample_size=n_neuron_sample)
+            neural_act, sample_n_neurons_list, sample_indices = sample_act(neural_act, layer_list, sample_size=n_neuron_sample)
+            layer_ids = layer_ids[sample_indices]
+            layer_names = layer_names[sample_indices]
 
         neural_pd = build_neural_correlation_matrix(neural_act, method)  # Build neural correlation matrix (depending on correlation method)
-        topo_feature = topo_feature_from_corr_matrix(PD_list=PD_list, method=method, neural_pd=neural_pd, model=model,
-                                                     rips=rips, filtration_method=filtration_method);
+        topo_feature = topo_feature_from_corr_matrix(PD_list=PD_list,
+                                                     method=method,
+                                                     neural_pd=neural_pd,
+                                                     model=model,
+                                                     rips=rips,
+                                                     filtration_method=filtration_method,
+                                                     layer_ids = layer_ids,
+                                                     layer_names = layer_names,
+                                                     )
 
         topo_feature_pos[c_idx, :] = topo_feature #overwrite where the feature is in the tensor (so topo_feature_pos stays at same size even with 0es)
 

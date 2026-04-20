@@ -9,7 +9,7 @@ from scipy.sparse.csr import csr_matrix
 from sklearn.manifold import MDS
 from sklearn.utils import check_symmetric
 
-from pointcloud_helper import plot_pointcloud
+from pointcloud_helper import plot_pointcloud, plot_pointcloud_layers
 
 from topo_utils import (
     mat_bc_adjacency,
@@ -139,7 +139,7 @@ def calc_topo_feature(PH: List, dim: int)-> Dict:
     return topo_feature_dict
 
 
-def generate_activation_vector_matrix(feature_dict_c: Dict) -> torch.Tensor:
+def generate_activation_vector_matrix(feature_dict_c: Dict):
     """
     takes input from the hooks for each layer
     Linear: (B, F) with B=Batch, F=Features
@@ -150,6 +150,9 @@ def generate_activation_vector_matrix(feature_dict_c: Dict) -> torch.Tensor:
     """
     print("Generating activation vector matrix")
     neural_activation_matrix = []
+    layer_ids = []
+    layer_names = []
+
     for key in feature_dict_c: #feature_dict = Dictionary, accessing via key!
         batch = feature_dict_c[key] #vectors for same batch
         activation_vector_len = len(batch.shape)
@@ -177,8 +180,13 @@ def generate_activation_vector_matrix(feature_dict_c: Dict) -> torch.Tensor:
                                    / (layer_act.std(1, keepdim=True) + 1e-30))
         neural_activation_matrix.append(layer_act)
 
+        layer_id, layer_name = key
+        for c in range(layer_act.shape[0]): #all channels
+            layer_ids.append(layer_id)
+            layer_names.append(layer_name)
+
     neural_activation_matrix = torch.cat(neural_activation_matrix, dim=0)
-    return neural_activation_matrix
+    return neural_activation_matrix, np.array(layer_ids), np.array(layer_names)
 
 def build_neural_correlation_matrix(neural_act: torch.Tensor, method:str) -> torch.Tensor:
     print("Building neural correlation matrix")
@@ -220,10 +228,12 @@ def topo_feature_from_corr_matrix(
         model,
         rips,
         filtration_method: str = 'vr',
+        layer_ids = None,
+        layer_names = None
         ):
     # ALPHA path:
     if filtration_method == 'alpha':
-        PH = build_persist_homology_alpha(PD_list, method, neural_pd, 3, 1)
+        PH = build_persist_homology_alpha(PD_list, method, neural_pd, 3, 1, layer_ids, layer_names)
         PH = adapt_topological_features_alpha(PH)
     # VR path:
     elif filtration_method == 'vr':
@@ -240,7 +250,9 @@ def build_persist_homology_alpha(
         method,
         neural_pd,
         space_for_mapping: int = 3,
-        random_state: int = 0):
+        random_state: int = 0,
+        layer_ids = None,
+        layer_names = None):
     """
     uses alpha-complex to calculate ph, input is space_for_mapping as the
     dimensionality of a lower-dimensional euklidian space where distance
@@ -258,9 +270,8 @@ def build_persist_homology_alpha(
               random_state=random_state)
     #check symmetry:
     print("max asymmetry:", np.abs(D - D.T).max())
-    print("diag max abs:", np.abs(np.diag(D)).max())
-    print("min D:", D.min(), "max D:", D.max())
 
+    #D not entirely symmetric -> needs to be symmetric for mds!
     D = np.asarray(D, dtype=np.float64)
     D = 0.5 * (D + D.T)
     np.fill_diagonal(D, 0.0)
@@ -270,7 +281,9 @@ def build_persist_homology_alpha(
 
     print("Plotting the Pointcloud...")
     if space_for_mapping == 3:
-        plot_pointcloud(points, f'Pointcloud in Euklidian space')
+        title = f'Pointcloud in Euklidian space'
+        # plot_pointcloud(points, title)
+        plot_pointcloud_layers(pointcloud=points, layers = layer_ids, layer_names = layer_names, title=title)
 
     alpha_complex = gudhi.AlphaComplex(points = points)
     stree = alpha_complex.create_simplex_tree()
