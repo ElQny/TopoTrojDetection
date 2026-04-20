@@ -1,58 +1,10 @@
 import random
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
-import pandas as pd
-import plotly.express as px
-from matplotlib.pyplot import title
-import open3d as o3d
 
-BASE_FORM = '../base_forms/square.off'
+from plots import *
 
-def plot_pointcloud(pointcloud: np.array, title: str):
-    df = pd.DataFrame(pointcloud, columns = ['x', 'y', 'z'])
-    fig = px.scatter_3d(
-        df,
-        x='x',
-        y='y',
-        z='z',
-        title = title,
-    )
-    fig.update_traces(marker=dict(size=2))  # markersize smaller
-    fig.show()
-
-def plot_pointcloud_layers(pointcloud:np.array, layers: np.array, layer_names: np.array, title:str):
-    df = pd.DataFrame(pointcloud, columns = ['x', 'y', 'z'])
-    df['layer_id'] = layers
-    df['layer_name'] = layer_names
-    df['layer_description'] = df['layer_id'].astype(str) + ': ' + df['layer_name'].astype(str)
-
-    fig = px.scatter_3d(
-        df,
-        x = 'x',
-        y = 'y',
-        z = 'z',
-        color = 'layer_description',
-        title = title,
-    )
-
-    fig.update_traces(
-        marker=dict(size=2),#markersize smaller
-    )
-    fig.show()
-
-#from: https://github.com/zhenxianglance/PCBA/blob/main/attack_visialization.py
-def plot_pointcloud_trigger(points_clean:np.array, points_backdoor:np.array):
-    pcd1 = o3d.geometry.PointCloud()
-    pcd1.points = o3d.utility.Vector3dVector(points_clean)
-    pcd1.paint_uniform_color(np.array([0.1, 0.1, 0.8]))
-    pcd2 = o3d.geometry.PointCloud()
-    pcd2.points = o3d.utility.Vector3dVector(points_backdoor)
-    pcd2.paint_uniform_color(np.array([0.8, 0.1, 0.1]))
-    # Attack
-    o3d.visualization.draw_geometries([pcd1, pcd2])
-    # Clean
-    o3d.visualization.draw_geometries([pcd1])
+BASE_FORM = '../base_forms/sphere.off'
 
 #src: https://github.com/zhenxianglance/PCBA/blob/main/dataset/dataset.py
 def center_and_scale(points: np.array) -> np.array:
@@ -210,9 +162,9 @@ def generate_perturbed_pointcloud_batch(batch_size, c_idx: int, cubes, device, e
             granularity=granularity,
             decimal_positions=round_decimals
         )
-        plot_pointcloud(temp_perturbed_pc, 'Perturbed pointcloud')
+        # plot_pointcloud(temp_perturbed_pc, 'Perturbed pointcloud')
         perturbed_pointclouds.append(temp_perturbed_pc)
-    #     perturbed_pointclouds.append(example_pointcloud) #for testing
+        # perturbed_pointclouds.append(example_pointcloud) #for testing
     perturbed_pointclouds = np.array(perturbed_pointclouds)
     tensor = transpose_and_batch_pointclouds_to_tensor(perturbed_pointclouds).to(device)
     return tensor
@@ -287,12 +239,12 @@ def generate_radius_batch(
     radii = np.arange(radius_min, radius_max + 1e-10, radius_step) #adding +1e-10 so the upper border is included
 
     for radius in radii: #generate Batch
-        trigger = load_off_file(BASE_FORM)
-        trigger = scale_trigger_to_radius(trigger, center, radius, number_of_points_trigger)
-        overlay = overlay_trigger_on_pointcloud(clean_pointcloud, trigger)
-        pointclouds.append(overlay)
+        # trigger = load_off_file(BASE_FORM)
+        # trigger = scale_trigger_to_radius(trigger, center, radius, number_of_points_trigger)
+        # overlay = overlay_trigger_on_pointcloud(clean_pointcloud, trigger)
+        # pointclouds.append(overlay)
         # plot_pointcloud_trigger(clean_pointcloud, trigger) #for plots
-        # pointclouds.append(clean_pointcloud) #for testing
+        pointclouds.append(clean_pointcloud) #for testing
 
     pointclouds = np.array(pointclouds)
     tensor = transpose_and_batch_pointclouds_to_tensor(pointclouds) # (B(radiusbatch), N(pointcount), 3) -> (B, 3, N)

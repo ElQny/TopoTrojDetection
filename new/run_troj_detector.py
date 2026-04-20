@@ -41,7 +41,7 @@ STEP_SIZE:  int = 2 # Stimulation stepsize used in PSF
 PATCH_SIZE: int = 2 # Stimulation patch size used in PSF
 STIM_LEVEL: int = 5 # Number of stimulation level used in PSF
 
-FILTRATION_METHOD: str='vr' #vr (Vietoris-Rips) or alpha
+FILTRATION_METHOD: str='alpha' #vr (Vietoris-Rips) or alpha
 N_SAMPLE_NEURONS: int = 1500  # Number of neurons for sampling
 USE_EXAMPLE: bool =  False     # Whether clean inputs will be given or not
 CORR_METRIC: str = 'distcorr'   # Correlation metric to be used
@@ -365,7 +365,7 @@ def main(
             weight=best_model_list['weight'][i]/sum(best_model_list['weight'])
             y_pred += best_bst.predict(dtest)*weight
 
-        y_pred = y_pred / len(best_model_list) # -> TODO: is this necessary? division above should do same
+        y_pred = y_pred / len(best_model_list)
         # debug-Ausgaben:
         print("labels: ", labels)
         print("y_pred before: ", y_pred)

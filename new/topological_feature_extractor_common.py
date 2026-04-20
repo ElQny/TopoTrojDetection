@@ -7,9 +7,8 @@ from ripser import Rips
 from scipy import sparse
 from scipy.sparse.csr import csr_matrix
 from sklearn.manifold import MDS
-from sklearn.utils import check_symmetric
 
-from pointcloud_helper import plot_pointcloud, plot_pointcloud_layers
+from plots import *
 
 from topo_utils import (
     mat_bc_adjacency,
@@ -281,13 +280,16 @@ def build_persist_homology_alpha(
 
     print("Plotting the Pointcloud...")
     if space_for_mapping == 3:
-        title = f'Pointcloud in Euklidian space'
-        # plot_pointcloud(points, title)
+        title = f'MDS pointcloud in Euklidian space'
+        # plot_pointcloud(points, title) #for plots
         plot_pointcloud_layers(pointcloud=points, layers = layer_ids, layer_names = layer_names, title=title)
 
     alpha_complex = gudhi.AlphaComplex(points = points)
     stree = alpha_complex.create_simplex_tree()
     PH = stree.persistence()
+
+    plot_persist_diagram(PH)
+
     return PH #(dimension, (birth, death))
 
 def adapt_topological_features_alpha(PH): #PH=(dimension, (birth, death)) -> [PH0, PH1]
