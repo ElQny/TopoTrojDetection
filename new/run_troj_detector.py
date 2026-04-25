@@ -35,6 +35,7 @@ from topological_feature_extractor_sphere import topo_psf_feature_extract_sphere
 
 from pointcloud_helper import load_off_file
 from run_crossval import run_crossval_xgb, run_crossval_mlp
+from plots import plot_topo_features
 
 # Algorithm Configuration
 STEP_SIZE:  int = 2 # Stimulation stepsize used in PSF
@@ -299,6 +300,15 @@ def main(
         f.close()
         fv_list.append(fv)
         # fv_list[i]['psf_feature_pos'] shape: 2 * nExample * fh * fw * nStimLevel * nClasses
+
+    # Plot part:
+    all_topo = []
+    for fv in fv_list:
+        arr = np.array(fv['topo_feature_pos'])
+        all_topo.append(arr)
+
+    all_topo = np.concatenate(all_topo, axis=0)
+    plot_topo_features(all_topo)
 
     # --------------------------------- Step II: Train Classifier ---------------------------------
     print(">>> Step II: Train Classifier <<<")

@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Dict
 from ripser import Rips
 
+from plots import *
 from topo_utils import feature_collect, parse_arch, sample_act
 from topological_feature_extractor_common import (
     generate_activation_vector_matrix,

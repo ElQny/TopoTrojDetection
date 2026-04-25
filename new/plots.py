@@ -9,7 +9,6 @@ def plot_persist_diagram(PH):
     gudhi.plot_persistence_diagram(PH)
     plt.show()
 
-
 def plot_pointcloud(pointcloud: np.array, title: str):
     df = pd.DataFrame(pointcloud, columns = ['x', 'y', 'z'])
     fig = px.scatter_3d(
@@ -58,3 +57,34 @@ def plot_pointcloud_trigger(points_clean:np.array, points_backdoor:np.array):
     o3d.visualization.draw_geometries([pcd1, pcd2])
     # Clean
     o3d.visualization.draw_geometries([pcd1])
+
+FEATURES = [
+    "avepersis_0",
+    "avemidlife_0",
+    "betti_0",
+    "maxmidlife_0",
+    "maxpersis_0",
+    "toppersis_0",
+    "avepersis_1",
+    "avemidlife_1",
+    "betti_1",
+    "maxmidlife_1",
+    "maxpersis_1",
+    "toppersis_1",
+]
+
+def plot_topo_features(topo_feature_pos):
+    arr = np.array(topo_feature_pos)
+
+    if arr.ndim == 3: #images (n_examples, n_positions, 12)
+        n_examples, n_positions, n_features = arr.shape
+        arr = arr.reshape(n_examples * n_positions, n_features) #reshape so it's 2d like pointclouds-form
+
+    fig = px.imshow(
+        arr,
+        x=FEATURES,
+        labels=dict(x="Topological feature", y="Batch / Center", color="Value"),
+        title="Topological features over full run"
+    )
+
+    fig.show()
