@@ -99,33 +99,36 @@ def plot_metrics_csv(directory_name: str, filenames: list) -> pd.DataFrame:
     for filename in filenames:
         path_to_file = os.path.join(directory_name, filename)
         df = pd.read_csv(path_to_file)
-
         new_df = df[["acc", "auc", "ce"]].copy()
         new_df["filename"] = filename.replace(".csv", "")
         list_of_dfs.append(new_df)
     joint_df = pd.concat(list_of_dfs, ignore_index=True)
-
     plot_df = joint_df.melt(
-        id_vars = "filename",
-        value_vars = ["acc", "auc", "ce"],
+        id_vars="filename",
+        value_vars=["acc", "auc", "ce"],
         var_name="metric",
-        value_name="value"
-    )
-
+        value_name="value")
     fig = px.box(
-        data_frame = plot_df,
-        facet_row = 'metric',
-        facet_col = 'filename',
-        y = 'value',
-        labels = {
+        plot_df,
+        x="filename",
+        y="value",
+        color="metric",
+        facet_row="metric",
+        labels={
             "filename": "Korrelationsmetrik",
-            "metric": "",
+            "metric": "Metrik",
             "value": "Wert"
         },
         title="Gegenüberstellung der Korrelationsmetriken",
     )
-
+    fig.update_yaxes(matches=None)
+    fig.update_layout(
+        template="ggplot2",
+        height=850,
+        boxmode="overlay" #overlay for no offset -> missalignment with "group"
+    )
     fig.show()
+    return joint_df
 
 def main():
     plot_metrics_csv("../tmp", ["bc.csv", "cos.csv", "distcorr.csv", "js.csv", "pearson.csv"])
