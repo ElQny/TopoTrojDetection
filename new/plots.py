@@ -4,6 +4,7 @@ import open3d as o3d
 import pandas as pd
 from matplotlib import pyplot as plt
 from plotly import express as px
+import os
 
 def plot_persist_diagram(PH):
     gudhi.plot_persistence_diagram(PH)
@@ -45,7 +46,7 @@ def plot_pointcloud_layers(pointcloud:np.array, layers: np.array, layer_names: n
 
 def plot_pointcloud_trigger(points_clean:np.array, points_backdoor:np.array):
     """
-    from: https://github.com/zhenxianglance/PCBA/blob/main/attack_visialization.py
+    taken from: https://github.com/zhenxianglance/PCBA/blob/main/attack_visialization.py
     """
     pcd1 = o3d.geometry.PointCloud()
     pcd1.points = o3d.utility.Vector3dVector(points_clean)
@@ -57,6 +58,8 @@ def plot_pointcloud_trigger(points_clean:np.array, points_backdoor:np.array):
     o3d.visualization.draw_geometries([pcd1, pcd2])
     # Clean
     o3d.visualization.draw_geometries([pcd1])
+
+
 
 FEATURES = [
     "avepersis_0",
@@ -76,7 +79,7 @@ FEATURES = [
 def plot_topo_features(topo_feature_pos):
     arr = np.array(topo_feature_pos)
 
-    if arr.ndim == 3: #images (n_examples, n_positions, 12)
+    if arr.ndim == 3: #images, so(n_examples, n_positions, 12)
         n_examples, n_positions, n_features = arr.shape
         arr = arr.reshape(n_examples * n_positions, n_features) #reshape so it's 2d like pointclouds-form
 
@@ -88,3 +91,45 @@ def plot_topo_features(topo_feature_pos):
     )
 
     fig.show()
+
+
+def plot_metrics_csv(directory_name: str, filenames: list) -> pd.DataFrame:
+    list_of_dfs = []
+
+    for filename in filenames:
+        path_to_file = os.path.join(directory_name, filename)
+        df = pd.read_csv(path_to_file)
+
+        new_df = df[["acc", "auc", "ce"]].copy()
+        new_df["filename"] = filename.replace(".csv", "")
+        list_of_dfs.append(new_df)
+    joint_df = pd.concat(list_of_dfs, ignore_index=True)
+
+    plot_df = joint_df.melt(
+        id_vars = "filename",
+        value_vars = ["acc", "auc", "ce"],
+        var_name="metric",
+        value_name="value"
+    )
+
+    fig = px.box(
+        data_frame = plot_df,
+        facet_row = 'metric',
+        facet_col = 'filename',
+        y = 'value',
+        labels = {
+            "filename": "Korrelationsmetrik",
+            "metric": "",
+            "value": "Wert"
+        },
+        title="Gegenüberstellung der Korrelationsmetriken",
+    )
+
+    fig.show()
+
+def main():
+    plot_metrics_csv("../tmp", ["bc.csv", "cos.csv", "distcorr.csv", "js.csv", "pearson.csv"])
+
+
+if __name__ == "__main__":
+    main()

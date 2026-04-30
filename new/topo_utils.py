@@ -41,9 +41,7 @@ def parse_arch(model: torch.tensor) -> Tuple[List, List]:
         elif isinstance(model._modules[k], (
             torch.nn.Conv1d,
             torch.nn.Conv2d,
-            torch.nn.Linear,
-            # torch.nn.BatchNorm1d,
-            # torch.nn.BatchNorm2d
+            torch.nn.Linear
         )):
             layer_list.append(model._modules[k])
             layer_k.append(model._modules[k]._get_name())
@@ -177,7 +175,6 @@ def mat_discorr_adjacency(X: torch.tensor, Y: torch.tensor = None) -> torch.tens
     return pd
 
 
-# TODO: finish all following doc
 def mat_bc_adjacency(X):
     '''
     Bhattacharyya correlation matrix version. Return pairwise BC correlation among all row vectors in X.

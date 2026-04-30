@@ -45,7 +45,7 @@ STIM_LEVEL: int = 5 # Number of stimulation level used in PSF
 FILTRATION_METHOD: str='alpha' #vr (Vietoris-Rips) or alpha
 N_SAMPLE_NEURONS: int = 1500  # Number of neurons for sampling
 USE_EXAMPLE: bool =  False     # Whether clean inputs will be given or not
-CORR_METRIC: str = 'distcorr'   # Correlation metric to be used
+CORR_METRIC: str = 'distcorr'   # Correlation metric to be used: distcorr, pearson, bc, cos, js
 CLASSIFIER: str  = 'xgboost'    # Classifier for the detection , choice = {xgboost, mlp}.
 
 # Experiment Configuration
@@ -72,18 +72,20 @@ ROUND_DECIMALS = 1
 
 
 def append_to_csv(filename:str, fieldnames:list, row:dict):
-    try:
-        if not os.path.dirname(filename):
-            raise IOError(f"Directory {os.path.dirname(filename)} does not exist")
-        with open(filename, 'a', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=fieldnames)
-            # if file doesn't exist yet: create with header
-            if os.path.getsize(filename) == 0:
-                print(f"Creating file {filename}")
-                writer.writeheader()
-            writer.writerow(row)
-    except Exception as e:
-        print(f"Error writing to csv: {e}")
+    directory = os.path.dirname(filename)
+
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    file_not_found = not (os.path.exists(filename))
+
+    with open(filename, 'a', newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        # if file doesn't exist yet: create with header
+        if file_not_found:
+            print(f"Creating file {filename}")
+            writer.writeheader()
+        writer.writerow(row)
+        file.flush()
 
 
 def build_psf_config(args, batch_size, corr_metric, device, granularity, n_neurons, number_of_points, patch_size,

@@ -126,7 +126,7 @@ def calc_topo_feature(PH: List, dim: int)-> Dict:
     betti = len(pd_dim)
     ave_persis = sum(pd_dim[:, 1] - pd_dim[:, 0]) / betti if betti > 0 else 0
     ave_midlife = (sum((pd_dim[:, 0] + pd_dim[:, 1]) / 2) / betti) if betti > 0 else 0
-    med_midlife = np.median((pd_dim[:, 0] + pd_dim[:, 1]) / 2) if betti > 0 else 0
+    med_midlife = np.median((pd_dim[:, 0] + pd_dim[:, 1]) / 2) if betti > 0 else 0 #mediam((death + birth / 2))
     max_persis = (pd_dim[:, 1] - pd_dim[:, 0]).max() if betti > 0 else 0
     top_5_persis = np.mean(np.sort(pd_dim[:, 1] - pd_dim[:, 0])[-5:]) if betti > 0 else 0
     topo_feature_dict = {"betti_" + str(dim): betti,
@@ -281,8 +281,8 @@ def build_persist_homology_alpha(
     print("Plotting the Pointcloud...")
     if space_for_mapping == 3:
         title = f'MDS pointcloud in Euklidian space'
-        # plot_pointcloud(points, title) #for plots
-        # plot_pointcloud_layers(pointcloud=points, layers = layer_ids, layer_names = layer_names, title=title)
+        plot_pointcloud(points, title) #for plots
+        plot_pointcloud_layers(pointcloud=points, layers = layer_ids, layer_names = layer_names, title=title)
 
     alpha_complex = gudhi.AlphaComplex(points = points)
     stree = alpha_complex.create_simplex_tree()
