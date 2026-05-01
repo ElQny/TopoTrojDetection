@@ -38,7 +38,11 @@ def parse_arch(model: torch.tensor) -> Tuple[List, List]:
             sub_layer_list, sub_layer_k = parse_arch(model._modules[k])
             layer_list += sub_layer_list
             layer_k += [k + '_' + x for x in sub_layer_k]
-        elif isinstance(model._modules[k], torch.nn.Conv1d) or isinstance(model._modules[k], torch.nn.Conv2d) or isinstance(model._modules[k], torch.nn.Linear):
+        elif isinstance(model._modules[k], (
+            torch.nn.Conv1d,
+            torch.nn.Conv2d,
+            torch.nn.Linear
+        )):
             layer_list.append(model._modules[k])
             layer_k.append(model._modules[k]._get_name())
     return layer_list, layer_k
@@ -98,7 +102,7 @@ def sample_act(neural_act: torch.tensor, layer_list: List, sample_size: int) -> 
     sample_n_neurons_list = [len(x) for x in sample_ind]
     sample_ind = np.concatenate(sample_ind)
 
-    return neural_act[sample_ind], sample_n_neurons_list
+    return neural_act[sample_ind], sample_n_neurons_list, sample_ind #returns indices of kept rows
 
 
 def process_pd(pd: torch.tensor, layer_list: List, sample_n_neurons_list: List = None) -> torch.tensor:
@@ -171,7 +175,6 @@ def mat_discorr_adjacency(X: torch.tensor, Y: torch.tensor = None) -> torch.tens
     return pd
 
 
-# TODO: finish all following doc
 def mat_bc_adjacency(X):
     '''
     Bhattacharyya correlation matrix version. Return pairwise BC correlation among all row vectors in X.

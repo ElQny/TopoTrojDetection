@@ -99,15 +99,11 @@ def plot_metrics_csv(directory_name: str, filenames: list) -> pd.DataFrame:
     for filename in filenames:
         path_to_file = os.path.join(directory_name, filename)
         df = pd.read_csv(path_to_file)
-        new_df = df[["acc", "auc", "ce"]].copy()
-        new_df["filename"] = filename.replace(".csv", "")
-        list_of_dfs.append(new_df)
-    joint_df = pd.concat(list_of_dfs, ignore_index=True)
-    plot_df = joint_df.melt(
-        id_vars="filename",
-        value_vars=["acc", "auc", "ce"],
-        var_name="metric",
-        value_name="value")
+        new = df[["acc", "auc", "ce"]].copy()
+        new["filename"] = filename.replace(".csv", "")
+        list_of_dfs.append(new)
+    joined_df = pd.concat(list_of_dfs, ignore_index=True)
+    plot_df = joined_df.melt(id_vars="filename", value_vars=["acc", "auc", "ce"], var_name="metric", value_name="value")
     fig = px.box(
         plot_df,
         x="filename",
@@ -121,17 +117,19 @@ def plot_metrics_csv(directory_name: str, filenames: list) -> pd.DataFrame:
         },
         title="Gegenüberstellung der Korrelationsmetriken",
     )
+
     fig.update_yaxes(matches=None)
     fig.update_layout(
         template="ggplot2",
         height=850,
+        # showlegend=False, #removes legend to the right
         boxmode="overlay" #overlay for no offset -> missalignment with "group"
     )
     fig.show()
-    return joint_df
+    return joined_df
 
 def main():
-    plot_metrics_csv("../tmp", ["bc.csv", "cos.csv", "distcorr.csv", "js.csv", "pearson.csv"])
+    plot_metrics_csv("./tmp", ["bc.csv", "js.csv", "distcorr.csv", "pearson.csv", "cos.csv"])
 
 
 if __name__ == "__main__":

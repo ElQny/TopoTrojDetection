@@ -278,11 +278,11 @@ def build_persist_homology_alpha(
 
     points = mds.fit_transform(D) #needs symmetric array!
 
-    print("Plotting the Pointcloud...")
+    # print("Plotting the Pointcloud...")
     if space_for_mapping == 3:
         title = f'MDS pointcloud in Euklidian space'
-        plot_pointcloud(points, title) #for plots
-        plot_pointcloud_layers(pointcloud=points, layers = layer_ids, layer_names = layer_names, title=title)
+        # plot_pointcloud(points, title) #for plots
+        # plot_pointcloud_layers(pointcloud=points, layers = layer_ids, layer_names = layer_names, title=title)
 
     alpha_complex = gudhi.AlphaComplex(points = points)
     stree = alpha_complex.create_simplex_tree()

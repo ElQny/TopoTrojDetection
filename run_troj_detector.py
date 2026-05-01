@@ -10,6 +10,7 @@ import json
 import jsonpickle
 from collections import defaultdict
 from typing import List
+import csv #for logging
 
 import torch
 import numpy as np
@@ -17,32 +18,189 @@ import pandas as pd
 import cv2
 from sklearn.metrics import roc_auc_score
 from sklearn import preprocessing
+from datetime import date
+from tqdm import tqdm
+from pathlib import Path
 import xgboost as xgb
 import argparse
 import pickle as pkl
-from datetime import date
-from tqdm import tqdm
 import glob
 import matplotlib.pyplot as plt
+import sys
+import importlib
 
-from topological_feature_extractor import topo_psf_feature_extract
+from topological_feature_extractor_img import topo_psf_feature_extract_img
+from topological_feature_extractor_pc import topo_psf_feature_extract_pc
+from topological_feature_extractor_sphere import topo_psf_feature_extract_sphere
+
+from pointcloud_helper import load_off_file
 from run_crossval import run_crossval_xgb, run_crossval_mlp
+from plots import plot_topo_features
 
 # Algorithm Configuration
-STEP_SIZE:  int = 2 # Stimulation stepsize used in PSF
-PATCH_SIZE: int = 2 # Stimulation patch size used in PSF
-STIM_LEVEL: int = 4 # Number of stimulation level used in PSF
-N_SAMPLE_NEURONS: int = 1.5e3  # Number of neurons for sampling
+STEP_SIZE:  int = 2 #Stimulation stepsize used in PSF
+PATCH_SIZE: int = 2 # timulation patch size used in PSF
+STIM_LEVEL: int = 5 # Number of stimulation level used in PSF
+
+FILTRATION_METHOD: str='vr' #vr (Vietoris-Rips) or alpha
+N_SAMPLE_NEURONS: int = 1500  # Number of neurons for sampling
 USE_EXAMPLE: bool =  False     # Whether clean inputs will be given or not
-CORR_METRIC: str = 'distcorr'   # Correlation metric to be used
+CORR_METRIC: str = 'distcorr'   # Correlation metric to be used: distcorr, pearson, bc, cos, js
 CLASSIFIER: str  = 'xgboost'    # Classifier for the detection , choice = {xgboost, mlp}.
+
 # Experiment Configuration
-INPUT_SIZE: List = [1, 28, 28] # Input images' shape (default to be MNIST)
+INPUT_SIZE_IMG: List = [1, 28, 28] #Input images' shape (default to be MNIST)
+INPUT_SIZE_PC: List = [23,3,1024] #Input Pointclouds shape (default PCBA)
+
 INPUT_RANGE: List = [0, 255]   # Input image range
 TRAIN_TEST_SPLIT: float = 0.8  # Ratio of train to test
 
+# Pointcloud-specific:
+NUMBER_OF_POINTS = 2048
+BATCH_SIZE = 16
+GRANULARITY = 4
 
-def main(args, patch_size=None, stim_level=None, step_size=None):
+# spheres:
+CENTER_STEP = 0.2
+RADIUS_STEP = 0.05
+RADIUS_MIN = 0.05
+RADIUS_MAX = 0.3
+N_POINTS_TRIGGER = 64
+
+#rounding:
+ROUND_DECIMALS = 1
+
+
+def append_to_csv(filename:str, fieldnames:list, row:dict):
+    directory = os.path.dirname(filename)
+
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    file_not_found = not (os.path.exists(filename))
+
+    with open(filename, 'a', newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        # if file doesn't exist yet: create with header
+        if file_not_found:
+            print(f"Creating file {filename}")
+            writer.writeheader()
+        writer.writerow(row)
+        file.flush()
+
+
+def build_psf_config(args, batch_size, corr_metric, device, granularity, n_neurons, number_of_points, patch_size,
+                     step_size, stim_level):
+    psf_config = {}
+    psf_config['filtration_method'] = FILTRATION_METHOD
+    psf_config['step_size'] = STEP_SIZE if step_size is None else step_size
+    psf_config['stim_level'] = STIM_LEVEL if stim_level is None else stim_level
+    psf_config['patch_size'] = PATCH_SIZE if patch_size is None else patch_size
+    psf_config['input_shape'] = INPUT_SIZE_IMG if args.mode == 'img' else INPUT_SIZE_PC
+    psf_config['input_range'] = INPUT_RANGE
+    psf_config['n_neuron'] = N_SAMPLE_NEURONS if n_neurons is None else n_neurons
+    psf_config['corr_method'] = CORR_METRIC if corr_metric is None else corr_metric
+    psf_config['device'] = device
+
+    # for Pointclouds:
+    if args.mode == 'pc' or args.mode == 'sphere':
+        psf_config['number_of_points'] = NUMBER_OF_POINTS if number_of_points is None else number_of_points
+        psf_config['granularity'] = GRANULARITY if granularity is None else granularity
+        psf_config['batch_size'] = BATCH_SIZE if batch_size is None else batch_size
+        psf_config['round_decimals'] = ROUND_DECIMALS
+
+    #for Sphere mode:
+    if args.mode == 'sphere':
+        psf_config['center_step'] = CENTER_STEP
+        psf_config['radius_step'] = RADIUS_STEP
+        psf_config['radius_min'] = RADIUS_MIN
+        psf_config['radius_max'] = RADIUS_MAX
+        psf_config['number_of_points_trigger'] = N_POINTS_TRIGGER
+
+    return psf_config
+
+
+def load_image_sample(args, model_name, model_train_example_config, root):
+    img_c = None
+    total_examples = 1  # Default to be a blank image if USE_EXAMPLE=False
+    # If use_examples then read in clean input example images
+    if USE_EXAMPLE and os.path.exists(model_train_example_config):
+        img_c = defaultdict(list)
+        example_file = pd.read_csv(model_train_example_config)
+        example_file.sample(frac=1)
+        n_classes = len(example_file['true_label'].unique())
+        for ind in range(example_file.shape[0]):
+            if example_file['triggered'].iloc[ind]:
+                continue
+            c = example_file['true_label'].iloc[ind]
+            if not len(img_c[c]):
+                img_file = \
+                glob.glob(os.path.join(root, model_name, '**', example_file['file'].iloc[ind]), recursive=True)[0]
+                img = torch.from_numpy(cv2.imread(img_file, cv2.IMREAD_UNCHANGED)).float()
+                img_c[c].append(img.permute(2, 0, 1).unsqueeze(0))
+            total_examples = sum([len(img_c[c]) for c in img_c])
+            if len(img_c.keys()) == n_classes and total_examples == n_classes:
+                break
+    return img_c, total_examples
+
+
+def get_features_for_model(args, model, model_name, model_train_example_config, psf_config, root):
+    if args.mode == 'img':
+        img_c, total_examples = load_image_sample(args, model_name, model_train_example_config, root)
+        fv = topo_psf_feature_extract_img(model, img_c, psf_config)
+
+    elif args.mode == 'pc':
+        clean_pc = load_off_file(args.example_pc_path) if args.example_pc_path else None
+        fv = topo_psf_feature_extract_pc(model, clean_pc, psf_config)  # random pointclouds
+        total_examples = 1
+
+    elif args.mode == 'sphere':
+        clean_pc = load_off_file(args.example_pc_path) if args.example_pc_path else None
+        fv = topo_psf_feature_extract_sphere(model, clean_pc, psf_config)  # spheres
+        total_examples = 1
+
+    else:
+        raise ValueError(f"Unknown mode: {args.mode}")
+    return fv, total_examples
+
+
+def calc_log_values(value_range: list, label: str, param_name: str, runs: int, log_path: str):
+    fieldnames = ["label", "param_name", "param_value", "index", "seed", "acc", "auc", "ce"]
+    filename = os.path.join(log_path, f"{param_name}.csv")  # takes argument log_path from main(args)
+
+    seed = args.seed
+    for value in value_range:
+        for i in range(runs):
+            args.seed = seed + i
+            kwargs: dict = {param_name: value}
+            acc_test, auc_test, ce_test = main(args, **kwargs)
+
+            append_to_csv(
+                filename=filename,
+                fieldnames=fieldnames,
+                row={
+                    "label": label,
+                    "param_name": param_name,
+                    "param_value": value,
+                    "index": i,
+                    "seed": args.seed,
+                    "acc": acc_test * 100,  # percentiles
+                    "auc": auc_test * 100,  # percentiles
+                    "ce": ce_test
+                }
+            )
+
+
+def main(
+        args,
+        patch_size=None,
+        stim_level=None,
+        step_size=None,
+        n_neurons = None,
+        corr_metric=None,
+        batch_size=None,
+        granularity=None,
+        number_of_points=None
+):
 
     seed = args.seed
     random.seed(seed)
@@ -55,18 +213,34 @@ def main(args, patch_size=None, stim_level=None, step_size=None):
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_ind
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    psf_config = {}
-    psf_config['step_size'] = STEP_SIZE if step_size is None else step_size
-    psf_config['stim_level'] = STIM_LEVEL if stim_level is None else stim_level
-    psf_config['patch_size'] = PATCH_SIZE if patch_size is None else patch_size
-    psf_config['input_shape'] = INPUT_SIZE
-    psf_config['input_range'] = INPUT_RANGE
-    psf_config['n_neuron'] = N_SAMPLE_NEURONS
-    psf_config['corr_method'] = CORR_METRIC
-    psf_config['device'] = device
+    psf_config = build_psf_config(
+        args = args,
+        batch_size = batch_size,
+        corr_metric =corr_metric,
+        device =device,
+        granularity= granularity,
+        n_neurons= n_neurons,
+        number_of_points=number_of_points,
+        patch_size=patch_size,
+        step_size=step_size,
+        stim_level=stim_level)
 
     root = args.data_root
     model_list = sorted(os.listdir(root))
+
+    if args.mode == 'pc':
+        if not args.pc_root:
+            raise ValueError("pc_root is required for Pointclouds!")
+
+    if args.mode == 'pc' or args.mode == 'sphere':
+        if not args.import_path:
+            raise ValueError("import_path is required for Pointclouds!")
+
+        path_for_imports = str(Path(args.import_path).resolve())
+        if path_for_imports not in sys.path:
+            sys.path.append(path_for_imports)  # imports the structure of the nn-Model from the model file (from where the pointcloud-neural-network was generated)
+        importlib.import_module("model")
+
 
     # --------------------------------- Step I: Feature Extraction ---------------------------------
     print(">>> Step I: Feature Extraction <<<")
@@ -83,7 +257,7 @@ def main(args, patch_size=None, stim_level=None, step_size=None):
 
         for root_m, dirnames, filenames in os.walk(os.path.join(root, model_name)):
             for filename in filenames:
-                if filename.endswith('.pt.1'):
+                if filename.endswith('.pt.1') or filename.endswith('.pt'): #appended so that .pt is also valid
                     model_file_path = os.path.join(root_m, filename)
                 if filename.endswith('gt.txt'):
                     gt_file = os.path.join(root_m, filename)
@@ -97,8 +271,9 @@ def main(args, patch_size=None, stim_level=None, step_size=None):
         try:
             model_file_path = model_file_path
             model = torch.load(model_file_path).to(device)
-        except:
-            print("Model {} .pt file is missing, skip to next model".format(model_name))
+        except Exception as e: #expanded so exception is actually printed
+            print(f"Model {model_name} .pt file is missing, skip to next model")
+            print(f"Exception: {e}")
             continue
         model.eval()
 
@@ -109,41 +284,33 @@ def main(args, patch_size=None, stim_level=None, step_size=None):
             continue
 
         if gt_file:
-            with open(gt_file, "r") as f:
+            with open(gt_file, "r") as f: #changed this from args.gt_file to gt_file!
                 lines = f.readlines()[0]
                 gt = int(lines.strip())
         else:
             gt = ('final_triggered_data_n_total' in model_config.keys())
         gt_list.append(gt)
 
-        img_c = None
-        total_examples = 1 # Default to be a blank image if USE_EXAMPLE=False
-        # If use_examples then read in clean input example images
-        if USE_EXAMPLE and os.path.exists(model_train_example_config):
-            img_c = defaultdict(list)
-            example_file = pd.read_csv(model_train_example_config)
-            example_file.sample(frac=1)
-            n_classes = len(example_file['true_label'].unique())
-            for ind in range(example_file.shape[0]):
-                if example_file['triggered'].iloc[ind]:
-                    continue
-                c = example_file['true_label'].iloc[ind]
-                if not len(img_c[c]):
-                    img_file=glob.glob(os.path.join(root, model_name, '**', example_file['file'].iloc[ind]), recursive=True)[0]
-                    img = torch.from_numpy(cv2.imread(img_file, cv2.IMREAD_UNCHANGED)).float()
-                    img_c[c].append(img.permute(2,0,1).unsqueeze(0))
-                total_examples = sum([len(img_c[c]) for c in img_c])
-                if len(img_c.keys()) == n_classes and total_examples == n_classes:
-                    break
 
         model_file_path_prefix = '/'.join(model_file_path.split('/')[:-1])
         save_file_path = os.path.join(model_file_path_prefix, 'test_extracted_psf_topo_feature.pkl')
-        fv = topo_psf_feature_extract(model, img_c, psf_config)
+
+        fv, total_examples = get_features_for_model(args, model, model_name, model_train_example_config, psf_config,
+                                                    root)
         with open(save_file_path, 'wb') as f:
             pkl.dump(fv, f)
         f.close()
         fv_list.append(fv)
         # fv_list[i]['psf_feature_pos'] shape: 2 * nExample * fh * fw * nStimLevel * nClasses
+
+    # Plot part:
+    all_topo = []
+    for fv in fv_list:
+        arr = np.array(fv['topo_feature_pos'])
+        all_topo.append(arr)
+
+    all_topo = np.concatenate(all_topo, axis=0)
+    plot_topo_features(all_topo)
 
     # --------------------------------- Step II: Train Classifier ---------------------------------
     print(">>> Step II: Train Classifier <<<")
@@ -162,16 +329,29 @@ def main(args, patch_size=None, stim_level=None, step_size=None):
         topo_feature = torch.cat([fv_list[i]['topo_feature_pos'].unsqueeze(0) for i in range(len(fv_list))])
 
         topo_feature[np.where(topo_feature==np.Inf)]=1
-        n, _, nEx, fnW, fnH, nStim, C = psf_feature.shape
-        psf_feature_dat=psf_feature.reshape(n, 2, -1, nStim, C)
+
+        if args.mode == 'pc' or args.mode == 'sphere':
+            for i in range(len(fv_list)):
+                fv_list[i] = fv_list[i]['psf_feature_pos'].unsqueeze(0)
+            psf_feature = torch.cat(fv_list)
+            n, _, nEx, nCubes, nPerturb, C = psf_feature.shape
+            psf_feature_dat = psf_feature.reshape(n, 2, -1, nPerturb, C)
+        else:
+            n, _, nEx, fnW, fnH, nStim, C = psf_feature.shape
+            psf_feature_dat=psf_feature.reshape(n, 2, -1, nStim, C)
+
         psf_diff_max=(psf_feature_dat.max(dim=3)[0]-psf_feature_dat.min(dim=3)[0]).max(2)[0].view(len(gt_list), -1)
         psf_med_max=psf_feature_dat.median(dim=3)[0].max(2)[0].view(len(gt_list), -1)
         psf_std_max=psf_feature_dat.std(dim=3).max(2)[0].view(len(gt_list), -1)
-        psf_topk_max=psf_feature_dat.topk(k=min(3, total_examples), dim=3)[0].mean(2).max(2)[0].view(len(gt_list), -1)
+
+        if args.mode=='pc' or args.mode == 'sphere': #NEW
+            psf_topk_max = psf_feature_dat.topk(k=min(3, nPerturb), dim=3)[0].mean(2).max(2)[0].view(len(gt_list), -1)
+        else:
+            psf_topk_max=psf_feature_dat.topk(k=min(3, total_examples), dim=3)[0].mean(2).max(2)[0].view(len(gt_list), -1)
         psf_feature_dat=torch.cat([psf_diff_max, psf_med_max, psf_std_max, psf_topk_max], dim=1)
 
-        dat=torch.cat([psf_feature_dat, topo_feature.view(topo_feature.shape[0], -1)], dim=1)
-        #dat = topo_feature.view(topo_feature.shape[0], -1)
+        dat=torch.cat([psf_feature_dat, topo_feature.view(topo_feature.shape[0], -1)], dim=1) #topo and psf features
+        # dat = topo_feature.view(topo_feature.shape[0], -1) #only topo features
         dat=preprocessing.scale(dat)
         gt_list=torch.tensor(gt_list)
 
@@ -198,14 +378,24 @@ def main(args, patch_size=None, stim_level=None, step_size=None):
             y_pred += best_bst.predict(dtest)*weight
 
         y_pred = y_pred / len(best_model_list)
+        # debug-Ausgaben:
+        print("labels: ", labels)
+        print("y_pred before: ", y_pred)
+
         T, b=best_model_list['threshold']
         y_pred=torch.sigmoid(b*(torch.tensor(y_pred)-T)).numpy()
+        print("y_pred afterwards: ", y_pred)
+
         acc_test = np.sum((y_pred >= 0.5)==labels)/len(y_pred)
         auc_test = roc_auc_score(labels, y_pred)
         ce_test = np.sum(-(labels * np.log(y_pred) + (1 - labels) * np.log(1 - y_pred))) / len(y_pred)
+        print("Final Acc {:.3f}% - Final AUC {:.3f} - Fianl CE {:.3f}".format(acc_test * 100, auc_test, ce_test))
+        #logger-ausgaben entfernt da csv-logging
 
-
+    #für Pointclouds/Spheres nicht implementiert
     if CLASSIFIER=='mlp':
+        if not args.mode == 'img':
+            raise ValueError("Classifier mlp not implemented for pointclouds")
         dat=[]
         for i in range(len(fv_list)):
             psf_fv_pos_i=fv_list[i]['psf_feature_pos']
@@ -269,35 +459,35 @@ def main(args, patch_size=None, stim_level=None, step_size=None):
         auc_test = roc_auc_score(gt_test.detach().cpu().numpy(), score[:, 1].numpy())
         ce_test = -np.mean(np.array(gt_test)*np.log(np.maximum(score[:,1].numpy(), 1e-4))+(1-np.array(gt_test))*np.log(np.maximum(1-score[:,1].numpy(), 1e-4)))
 
-    logger_name=date.today().strftime("%d-%m-%Y")+'_synthetic_'+"-".join([str(x) for x in psf_config['input_shape']])
-    logger_file=os.path.join(args.log_path, logger_name)
-    if not os.path.exists(args.log_path):
-        os.mkdir(args.log_path)
-    logger=open(logger_file, 'w')
+
     print("Final Acc {:.3f}% - Final AUC {:.3f} - Fianl CE {:.3f}".format(acc_test*100, auc_test, ce_test))
-    logger.write("Final Acc {:.3f}% - Final AUC {:.3f} - Fianl CE {:.3f}".format(acc_test*100, auc_test, ce_test))
-    logger.flush()
-    logger.close()
+    # logger-ausgaben entfernt da csv-logging
 
     return acc_test, auc_test, ce_test
+
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Extract feature and train trojan detector for synthetic experiment')
+    parser.add_argument('--mode', choices=['img', 'pc', 'sphere'], default='img', help='Mode of the Detector') #https://docs.python.org/3/library/argparse.html - on/off flag
     parser.add_argument('--data_root', type=str, help='Root folder that saves the experiment models')
     parser.add_argument('--log_path', type=str, help='Output log save dir', default='./tmp')
     parser.add_argument('--gpu_ind', type=str, help='Indices of GPUs to be used', default='0')
     parser.add_argument('--seed', type=int, help="Experiment random seed", default=123)
+    parser.add_argument('--pc_root', type=str, help="Root folder to the pointcloud models")
+    parser.add_argument('--import_path', type=str, help="Import path for the pointcloud model")
+    parser.add_argument('--example_pc_path', type=str, help='Path to clean pointcloud as OFF file')
     args = parser.parse_args()
 
-    exp_logfile=date.today().strftime("%d-%m-%Y")+f'{CORR_METRIC}_{CLASSIFIER}_{N_SAMPLE_NEURONS}_{STEP_SIZE}_{STIM_LEVEL}_{PATCH_SIZE}.json'
-    exp_logfile=os.path.join(args.log_path, exp_logfile)
-    exp_config={}
-    for k, v in args._get_kwargs():
-        exp_config[k]=v
+    value_range_std = range(10)
+    corr_metrics = ["distcorr", "pearson", "bc", "cos", "js"]
 
+    # calc_log_values([1500, 2500, 3500], "N_SAMPLE_NEURONS", "n_neurons", 10, args.log_path)
+    # calc_log_values(value_range_std, "STEP_SIZE", "step_size", 10, args.log_path)
+    # calc_log_values(value_range_std, "PATCH_SIZE", "patch_size", 10, args.log_path)
+    # calc_log_values(value_range_std, "STIM_LEVEL", "stim_level", 10, args.log_path)
+    # calc_log_values(corr_metrics, "CORR_METRIC", "corr_metric", 10, args.log_path)
+
+    #NORMAL OUTPUT:
     acc_test, auc_test, ce_test = main(args)
-
-    with open(exp_logfile, 'w') as f:
-        json.dump(exp_config, f, sort_keys=False, indent=4)
-    f.close()
+    print(f"ACC: {acc_test}, AUC: {auc_test}, CE: {ce_test}")

@@ -1,24 +1,31 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-import gc
-from collections import defaultdict
-from typing import List, Tuple, Dict, Optional, Any
-
-import torch
 import numpy as np
+import torch
+
+from typing import Dict, Optional
 from ripser import Rips
-from scipy import sparse
-from scipy.sparse.csr import csr_matrix
-import time
 
-from topo_utils import mat_bc_adjacency, parse_arch, feature_collect, sample_act, mat_discorr_adjacency, mat_cos_adjacency, mat_jsdiv_adjacency, mat_pearson_adjacency
-from topological_feature_extractor import *
-from pointcloud_helper import *
-
+from topo_utils import feature_collect, parse_arch, sample_act
+from pointcloud_helper import (
+    create_sample_pointcloud,
+    center_and_scale,
+    generate_cubes,
+    choose_sub_pointclouds,
+    transpose_and_batch_pointclouds_to_tensor,
+    generate_perturbed_pointcloud_batch,
+)
+from topological_feature_extractor_common import (
+    generate_activation_vector_matrix,
+    build_neural_correlation_matrix,
+    build_persist_homology_vr,
+    compute_topological_features,
+    build_persist_homology_alpha,
+    adapt_topological_features_alpha,
+    topo_feature_from_corr_matrix
+)
 
 def read_pointcloud_psf_config(psf_config: Dict):
     # reads out parameters from psf_config (dictionary)
+    filtration_method = psf_config['filtration_method']
     number_of_points = psf_config['number_of_points']
     granularity = psf_config['granularity']
     batch_size = psf_config['batch_size']
@@ -26,98 +33,26 @@ def read_pointcloud_psf_config(psf_config: Dict):
     method = psf_config['corr_method']
     device = psf_config['device']
     round_decimals = psf_config.get('round_decimals', None) #optional parameter
-    return n_neuron_sample, method, device, number_of_points, granularity, batch_size, round_decimals
+    return (filtration_method,
+            n_neuron_sample,
+            method,
+            device,
+            number_of_points,
+            granularity,
+            batch_size,
+            round_decimals)
 
-def generate_activation_vector_matrix(feature_dict_c: Dict) -> torch.Tensor:
-    print("Generating activation vector matrix")
-    neural_activation_matrix = []
-    for k in feature_dict_c:
-        #Conv1d is (B, C, N) with B==2 / B==3 etc.!!
-        if len(feature_dict_c[k][0].shape) == 2:
-            layer_act = [
-                feature_dict_c[k][i].max(1)[0].unsqueeze(1)
-                for i in range(len(feature_dict_c[k]))
-            ]
-        else:
-            layer_act = [
-                feature_dict_c[k][i].unsqueeze(1)
-                for i in range(len(feature_dict_c[k]))
-            ]
-
-        layer_act = torch.cat(layer_act, dim=1)
-        # Standardize the activation layer-wisely
-        layer_act = ((layer_act - layer_act.mean(1, keepdim=True))
-                                   / (layer_act.std(1, keepdim=True) + 1e-30))
-        neural_activation_matrix.append(layer_act)
-
-    neural_activation_matrix = torch.cat(neural_activation_matrix, dim=0)
-    return neural_activation_matrix
-
-def build_neural_correlation_matrix(neural_act: torch.Tensor, method:str) -> torch.Tensor:
-    print("Building neural correlation matrix")
-    if method == 'distcorr':
-        neural_pd = mat_discorr_adjacency(neural_act)
-    elif method == 'bc':
-        neural_act = torch.softmax(neural_act, 1)
-        neural_pd = mat_bc_adjacency(neural_act)
-    elif method == 'cos':
-        neural_pd = mat_cos_adjacency(neural_act)
-    elif method == 'pearson':
-        neural_pd = mat_pearson_adjacency(neural_act)
-    elif method == 'js':
-        neural_act = torch.softmax(neural_act, 1)
-        neural_pd = mat_jsdiv_adjacency(neural_act)
-    else:
-        raise Exception(f"Correlation metric {method} isn't implemented !")
-    return neural_pd
-
-def build_persist_homology(PD_list, method, model: torch.nn.Module, neural_pd, rips: Rips):
-    print("Building persist homology matrix")
-    D = 1 - neural_pd.detach().cpu().numpy() \
-        if method != 'bc' \
-        else -np.log(neural_pd.detach().cpu().numpy() + 1e-6)
-    PD_list.append(neural_pd.detach().cpu().numpy())
-    if model._get_name == 'ModdedLeNet5Net':
-        PH = rips.fit_transform(D, distance_matrix=True)  # directly calling ripser
-    else:
-        lambdas = getGreedyPerm(D)  # furthest-point-sampling
-        D = getApproxSparseDM(lambdas, 0.1, D)  # approx. distance matrix building
-        PH = rips.fit_transform(D, distance_matrix=True)  # calling ripser -> faster calculation for larger networks
-    return PH
-
-
-def compute_topological_features(PH):
-    print("Computing topological features")
-    PH[0] = np.array(PH[0])
-    PH[1] = np.array(PH[1])
-
-    PH[0][np.where(PH[0] == np.inf)] = 1
-    PH[1][np.where(PH[1] == np.inf)] = 1
-
-    # Compute the topological feature with the persistent diagram
-    clean_feature_0 = calc_topo_feature(PH, 0)  # 6 topological features for dimension 0
-    clean_feature_1 = calc_topo_feature(PH, 1)  # 6 topological features for dimension 1
-
-    topo_feature = []  # append all these features to topo_feature array -> 12 features
-    for k in sorted(list(clean_feature_0)):
-        topo_feature.append(clean_feature_0[k])
-    for k in sorted(list(clean_feature_1)):
-        topo_feature.append(clean_feature_1[k])
-    topo_feature = torch.tensor(topo_feature)
-    return topo_feature
-
-
-def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Dict, psf_config: Dict) -> Dict:
+def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Optional[np.ndarray], psf_config: Dict) -> Dict:
     """
-        Combines all above functions as well as helper functions:
-        - builds the pointcloud (without any example pointclouds)
-        - generates perturbed pointclouds by cube-wise-perturbation
-        - uses the DNN previously generated to get activation vectors
-        - generates distance matrix from vectors
-        - vectors are turned into topological features
+        Extract topological features from a given torch model.
+        Input args:
+            model (torch.nn.Module). Target model.
+            example_dict (Dict). Optional. Dictionary contains clean input examples. If None then all blank images are used.
+        Return:
+            fv (Dict). Dictionary contains extracted features
     """
-
-    (n_neuron_sample,
+    (filtration_method,
+     n_neuron_sample,
      method,
      device,
      number_of_points,
@@ -128,11 +63,12 @@ def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Dict
     #if no input example is given, use random pointcloud instead:
     if example_pointcloud is None:
         example_pointcloud = create_sample_pointcloud(number_of_points)
+    else:
+        example_pointcloud = np.array(example_pointcloud)
     example_pointcloud = center_and_scale(example_pointcloud)
 
     model = model.to(device)
-    model.eval() #TODO: is this necessary?
-
+    model.eval() # necessary for certain layers https://stackoverflow.com/questions/60018578/what-does-model-eval-do-in-pytorch
 
     cubes = generate_cubes(granularity)
     sub_pointclouds = choose_sub_pointclouds(
@@ -140,26 +76,22 @@ def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Dict
         granularity=granularity
     )
 
-    topo_feature_pos = torch.zeros(  #fixed size in zeroes
+    test_in = transpose_and_batch_pointclouds_to_tensor(
+        np.array([example_pointcloud])
+    ) #test_in = (B, 3, N)
+    test_in = test_in.to(device)
+    with torch.no_grad():  # reduce memory consumption (no Tensor.backward() calls here) https://docs.pytorch.org/docs/stable/generated/torch.no_grad.html
+        test_out = model(test_in)
+
+    if isinstance(test_out, tuple):
+        test_out = test_out[0]
+    num_classes = int(test_out.shape[1])
+
+    topo_feature_pos = torch.zeros(  # fixed size in zeroes
         len(cubes),
         12,
         dtype=torch.float32
     )
-
-    # cube-wise perturbation strategy:
-    PD_list=[]
-    rips = Rips(verbose=False)
-    model = model.to(device)
-    layer_list, _ = parse_arch(model)
-
-    test_input = transpose_and_batch_pointclouds_to_tensor(
-        np.array([example_pointcloud])
-    ).to(device)
-
-    test_out = model(test_input)
-    if isinstance(test_out, tuple):
-        test_out = test_out[0]
-    num_classes = int(test_out.shape[1])
 
     psf_feature_pos = torch.zeros(
         2,  # score + confidence
@@ -170,11 +102,17 @@ def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Dict
         dtype=torch.float32
     )
 
+    # cube-wise perturbation strategy:
+    PD_list=[]
+    rips = Rips(verbose=False)
+    model = model.to(device)
+
     for c_idx in range(len(cubes)):
         print("Cube #", c_idx, ":")
         points_in_cube = sub_pointclouds[c_idx]
         if len(points_in_cube) == 0: #skip empty cubes
             continue
+
         tensor = generate_perturbed_pointcloud_batch(
             batch_size = batch_size,
             c_idx = c_idx,
@@ -184,23 +122,39 @@ def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Dict
             granularity=granularity,
             points_in_cube=points_in_cube,
             round_decimals=round_decimals)
+        tensor = tensor.to(device) #needs to be on same device as model for feature_collect
+
         feature_dict_c, output = feature_collect(model, tensor) #returns hooked activations and model output
         if isinstance(output, tuple):
             output = output[0]
+
         psf_score = output.detach().cpu()
         psf_conf = torch.softmax(psf_score, dim=1)
 
         psf_feature_pos[0,0,c_idx, :, :] = psf_score
         psf_feature_pos[1,0,c_idx, :,:] = psf_conf
 
-        neural_act = generate_activation_vector_matrix(feature_dict_c)  # hook-features -> neural activation matrix
+        layer_list, _ = parse_arch(model)
+        sample_n_neurons_list = None
+
+        neural_act, layer_ids, layer_names = generate_activation_vector_matrix(feature_dict_c)  # hook-features -> neural activation matrix
 
         if len(neural_act) > 1.5e3:
-            neural_act, sample_n_neurons_list = sample_act(neural_act, layer_list, sample_size=n_neuron_sample)
+            neural_act, sample_n_neurons_list, sample_indices = sample_act(neural_act, layer_list, sample_size=n_neuron_sample)
+            layer_ids = layer_ids[sample_indices]
+            layer_names = layer_names[sample_indices]
 
         neural_pd = build_neural_correlation_matrix(neural_act, method)  # Build neural correlation matrix (depending on correlation method)
-        PH = build_persist_homology(PD_list, method, model, neural_pd, rips)   # Distance Matrix generation (D = 1-correlation) -> weights for correlation matrix!
-        topo_feature = compute_topological_features(PH) # PH = persistent homology (basically persistence diagram)
+        topo_feature = topo_feature_from_corr_matrix(PD_list=PD_list,
+                                                     method=method,
+                                                     neural_pd=neural_pd,
+                                                     model=model,
+                                                     rips=rips,
+                                                     filtration_method=filtration_method,
+                                                     layer_ids = layer_ids,
+                                                     layer_names = layer_names,
+                                                     )
+
         topo_feature_pos[c_idx, :] = topo_feature #overwrite where the feature is in the tensor (so topo_feature_pos stays at same size even with 0es)
 
     fv = {}
@@ -208,3 +162,6 @@ def topo_psf_feature_extract_pc(model: torch.nn.Module, example_pointcloud: Dict
     fv['correlation_matrix'] = np.vstack([x[None, :, :] for x in PD_list]).mean(0)
     fv['psf_feature_pos'] = psf_feature_pos
     return fv
+
+
+

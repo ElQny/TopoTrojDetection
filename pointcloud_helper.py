@@ -1,19 +1,10 @@
 import random
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
 
-def plot_pointcloud(pointcloud: np.array, title: str):
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+from plots import *
 
-    x = pointcloud[:, 0]
-    y = pointcloud[:, 1]
-    z = pointcloud[:, 2]
-
-    ax.scatter(x, y, z)
-    ax.set_title(title)
-    plt.show()
+BASE_FORM = '../base_forms/sphere.off'
 
 #src: https://github.com/zhenxianglance/PCBA/blob/main/dataset/dataset.py
 def center_and_scale(points: np.array) -> np.array:
@@ -171,8 +162,9 @@ def generate_perturbed_pointcloud_batch(batch_size, c_idx: int, cubes, device, e
             granularity=granularity,
             decimal_positions=round_decimals
         )
+        # plot_pointcloud(temp_perturbed_pc, 'Perturbed pointcloud')
         perturbed_pointclouds.append(temp_perturbed_pc)
-
+        # perturbed_pointclouds.append(example_pointcloud) #for testing
     perturbed_pointclouds = np.array(perturbed_pointclouds)
     tensor = transpose_and_batch_pointclouds_to_tensor(perturbed_pointclouds).to(device)
     return tensor
@@ -207,7 +199,8 @@ def generate_spheres_from_center(step: float, radius, npoints:int):
     centers=possible_sphere_centers(step)
 
     for center in centers: #generates a sphere for each possible center
-        pointcloud = generate_pcba_sphere_from_center(center, radius, npoints)
+        trigger = scale_trigger_to_radius(center, radius, npoints)
+        pointcloud = generate_pcba_sphere_from_centergener(center, radius, npoints)
         pointclouds.append(pointcloud)
         # information.append({
         #     "radius": radius,
@@ -216,6 +209,22 @@ def generate_spheres_from_center(step: float, radius, npoints:int):
     pointclouds = np.array(pointclouds)
     # return pointclouds, information
     return pointclouds
+
+def scale_trigger_to_radius(trigger: np.array, center, radius:int, number_of_points:int) -> np.array:
+    print(f"Scaling the trigger to radius {radius} and center {center}")
+
+    center = np.array(center)
+    if (trigger.shape[0] > number_of_points): #reduce to number of points
+        indices = np.random.choice(trigger.shape[0], number_of_points, replace=False)
+        trigger = trigger[indices]
+
+    points = trigger - np.mean(trigger, axis=0, keepdims=True) # center trigger
+
+    dist = np.max(np.sqrt(np.sum(points ** 2, axis=1)), 0)
+    points = (points * radius) / dist
+
+    points = points + center
+    return points
 
 def generate_radius_batch(
         clean_pointcloud: np.array,
@@ -229,13 +238,16 @@ def generate_radius_batch(
     pointclouds = []
     radii = np.arange(radius_min, radius_max + 1e-10, radius_step) #adding +1e-10 so the upper border is included
 
-    for radius in radii:
-        trigger = generate_pcba_sphere_from_center(center, radius, number_of_points_trigger)
-        overlay = overlay_trigger_on_pointcloud(clean_pointcloud, trigger)
-        pointclouds.append(overlay)
+    for radius in radii: #generate Batch
+        # trigger = load_off_file(BASE_FORM)
+        # trigger = scale_trigger_to_radius(trigger, center, radius, number_of_points_trigger)
+        # overlay = overlay_trigger_on_pointcloud(clean_pointcloud, trigger)
+        # pointclouds.append(overlay)
+        # plot_pointcloud_trigger(clean_pointcloud, trigger) #for plots
+        pointclouds.append(clean_pointcloud) #for testing
 
     pointclouds = np.array(pointclouds)
-    tensor = transpose_and_batch_pointclouds_to_tensor(pointclouds) # (radiuscount, pointcount, 3) -> (radiuscount, 3, pointcount)
+    tensor = transpose_and_batch_pointclouds_to_tensor(pointclouds) # (B(radiusbatch), N(pointcount), 3) -> (B, 3, N)
     return tensor, radii
 
 
