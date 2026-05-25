@@ -148,12 +148,12 @@ def get_features_for_model(args, model, model_name, model_train_example_config, 
         img_c, total_examples = load_image_sample(args, model_name, model_train_example_config, root)
         fv = topo_psf_feature_extract_img(model, img_c, psf_config)
 
-    elif args.mode == 'pc':
+    elif args.mode == 'pc': #pointcloud mode: used for raster-based perturbation
         clean_pc = load_off_file(args.example_pc_path) if args.example_pc_path else None
         fv = topo_psf_feature_extract_pc(model, clean_pc, psf_config)  # random pointclouds
         total_examples = 1
 
-    elif args.mode == 'sphere':
+    elif args.mode == 'sphere': #sphere mode: inserts a sphere or other object as trigger into a given sample pointcloud
         clean_pc = load_off_file(args.example_pc_path) if args.example_pc_path else None
         fv = topo_psf_feature_extract_sphere(model, clean_pc, psf_config)  # spheres
         total_examples = 1
@@ -291,7 +291,6 @@ def main(
             gt = ('final_triggered_data_n_total' in model_config.keys())
         gt_list.append(gt)
 
-
         model_file_path_prefix = '/'.join(model_file_path.split('/')[:-1])
         save_file_path = os.path.join(model_file_path_prefix, 'test_extracted_psf_topo_feature.pkl')
 
@@ -344,7 +343,7 @@ def main(
         psf_med_max=psf_feature_dat.median(dim=3)[0].max(2)[0].view(len(gt_list), -1)
         psf_std_max=psf_feature_dat.std(dim=3).max(2)[0].view(len(gt_list), -1)
 
-        if args.mode=='pc' or args.mode == 'sphere': #NEW
+        if args.mode=='pc' or args.mode == 'sphere':
             psf_topk_max = psf_feature_dat.topk(k=min(3, nPerturb), dim=3)[0].mean(2).max(2)[0].view(len(gt_list), -1)
         else:
             psf_topk_max=psf_feature_dat.topk(k=min(3, total_examples), dim=3)[0].mean(2).max(2)[0].view(len(gt_list), -1)
@@ -390,9 +389,9 @@ def main(
         auc_test = roc_auc_score(labels, y_pred)
         ce_test = np.sum(-(labels * np.log(y_pred) + (1 - labels) * np.log(1 - y_pred))) / len(y_pred)
         print("Final Acc {:.3f}% - Final AUC {:.3f} - Fianl CE {:.3f}".format(acc_test * 100, auc_test, ce_test))
-        #logger-ausgaben entfernt da csv-logging
+        #removed logging because logged as csv
 
-    #für Pointclouds/Spheres nicht implementiert
+    #not implemented for pointclouds
     if CLASSIFIER=='mlp':
         if not args.mode == 'img':
             raise ValueError("Classifier mlp not implemented for pointclouds")
@@ -481,6 +480,7 @@ if __name__ == '__main__':
 
     value_range_std = range(10)
     corr_metrics = ["distcorr", "pearson", "bc", "cos", "js"]
+    fieldnames = ["index", "seed", "acc", "auc", "ce"]
 
     # calc_log_values([1500, 2500, 3500], "N_SAMPLE_NEURONS", "n_neurons", 10, args.log_path)
     # calc_log_values(value_range_std, "STEP_SIZE", "step_size", 10, args.log_path)
@@ -488,6 +488,21 @@ if __name__ == '__main__':
     # calc_log_values(value_range_std, "STIM_LEVEL", "stim_level", 10, args.log_path)
     # calc_log_values(corr_metrics, "CORR_METRIC", "corr_metric", 10, args.log_path)
 
-    #NORMAL OUTPUT:
-    acc_test, auc_test, ce_test = main(args)
-    print(f"ACC: {acc_test}, AUC: {auc_test}, CE: {ce_test}")
+    #Output to CSV:
+    for i in range(50):
+        args.seed = random.randint(150, 99999)
+        print(f"Seed: {args.seed}")
+        acc_test, auc_test, ce_test = main(args)
+        append_to_csv(
+            filename='./tmp/pointcloud.csv',
+            fieldnames=fieldnames,
+            row={
+                "index": i,
+                "seed": args.seed,
+                "acc": acc_test * 100,  # percentiles
+                "auc": auc_test * 100,  # percentiles
+                "ce": ce_test
+            }
+        )
+        # NORMAL OUTPUT
+        print(f"ACC: {acc_test}, AUC: {auc_test}, CE: {ce_test}")

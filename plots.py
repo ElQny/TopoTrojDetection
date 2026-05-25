@@ -60,7 +60,6 @@ def plot_pointcloud_trigger(points_clean:np.array, points_backdoor:np.array):
     o3d.visualization.draw_geometries([pcd1])
 
 
-
 FEATURES = [
     "avepersis_0",
     "avemidlife_0",
@@ -100,10 +99,13 @@ def plot_metrics_csv(directory_name: str, filenames: list) -> pd.DataFrame:
         path_to_file = os.path.join(directory_name, filename)
         df = pd.read_csv(path_to_file)
         new = df[["acc", "auc", "ce"]].copy()
+
         new["filename"] = filename.replace(".csv", "")
         list_of_dfs.append(new)
+
     joined_df = pd.concat(list_of_dfs, ignore_index=True)
     plot_df = joined_df.melt(id_vars="filename", value_vars=["acc", "auc", "ce"], var_name="metric", value_name="value")
+
     fig = px.box(
         plot_df,
         x="filename",
@@ -115,22 +117,57 @@ def plot_metrics_csv(directory_name: str, filenames: list) -> pd.DataFrame:
             "metric": "Metrik",
             "value": "Wert"
         },
-        title="Gegenüberstellung der Korrelationsmetriken",
+        title="Gegenüberstellung der Korrelationsmetriken bei Bild-Pipeline",
     )
 
     fig.update_yaxes(matches=None)
+    fig.update_yaxes(range=[0,1], row=1, col=1) #ce
+    fig.update_yaxes(range=[0,100], row=2, col=1) #auc
+    fig.update_yaxes(range=[0,100], row=3, col=1) #acc
+
     fig.update_layout(
         template="ggplot2",
         height=850,
-        # showlegend=False, #removes legend to the right
-        boxmode="overlay" #overlay for no offset -> missalignment with "group"
-    )
+        showlegend=False, #removes legend to the right
+        boxmode="group" #overlay for no offset -> missalignment with "group"
+    )                   #group for grouped visual
     fig.show()
     return joined_df
 
+def plot_single_csv(directory_name: str, filename: str) -> pd.DataFrame:
+    path_to_file = os.path.join(directory_name, filename)
+    df = pd.read_csv(path_to_file)
+
+    plot_df = df.melt(value_vars=["acc", "auc"], var_name="metric", value_name="value")
+    fig = px.box(
+        plot_df,
+        x="metric",
+        y="value",
+        labels={
+            "metric": "Metrik",
+            "value": "Wert"
+        },
+        title="Bewertung der Pointcloud-Pipeline",
+    )
+
+    fig.update_layout(
+        template="ggplot2",
+        height=500,
+        showlegend=False, #removes legend to the right
+    )
+
+    fig.show()
+
+    ce_mean = df["ce"].mean()
+    ce_std = df["ce"].std()
+    print(f"CE mean= {ce_mean}")
+    print(f"CE std = {ce_std}")
+    return plot_df
+
+
 def main():
     plot_metrics_csv("./tmp", ["bc.csv", "js.csv", "distcorr.csv", "pearson.csv", "cos.csv"])
-
+    # plot_single_csv("./tmp", "pointcloud.csv")
 
 if __name__ == "__main__":
     main()

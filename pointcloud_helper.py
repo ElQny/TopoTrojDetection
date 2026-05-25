@@ -162,7 +162,7 @@ def generate_perturbed_pointcloud_batch(batch_size, c_idx: int, cubes, device, e
             granularity=granularity,
             decimal_positions=round_decimals
         )
-        # plot_pointcloud(temp_perturbed_pc, 'Perturbed pointcloud')
+        # plot_pointcloud(temp_perturbed_pc, 'Perturbed pointcloud') #plots each perturbed pointcloud
         perturbed_pointclouds.append(temp_perturbed_pc)
         # perturbed_pointclouds.append(example_pointcloud) #for testing
     perturbed_pointclouds = np.array(perturbed_pointclouds)
@@ -202,12 +202,7 @@ def generate_spheres_from_center(step: float, radius, npoints:int):
         trigger = scale_trigger_to_radius(center, radius, npoints)
         pointcloud = generate_pcba_sphere_from_centergener(center, radius, npoints)
         pointclouds.append(pointcloud)
-        # information.append({
-        #     "radius": radius,
-        #     "center": center
-        # })
     pointclouds = np.array(pointclouds)
-    # return pointclouds, information
     return pointclouds
 
 def scale_trigger_to_radius(trigger: np.array, center, radius:int, number_of_points:int) -> np.array:
@@ -239,12 +234,12 @@ def generate_radius_batch(
     radii = np.arange(radius_min, radius_max + 1e-10, radius_step) #adding +1e-10 so the upper border is included
 
     for radius in radii: #generate Batch
-        # trigger = load_off_file(BASE_FORM)
-        # trigger = scale_trigger_to_radius(trigger, center, radius, number_of_points_trigger)
-        # overlay = overlay_trigger_on_pointcloud(clean_pointcloud, trigger)
-        # pointclouds.append(overlay)
-        # plot_pointcloud_trigger(clean_pointcloud, trigger) #for plots
-        pointclouds.append(clean_pointcloud) #for testing
+        trigger = load_off_file(BASE_FORM)
+        trigger = scale_trigger_to_radius(trigger, center, radius, number_of_points_trigger)
+        overlay = overlay_trigger_on_pointcloud(clean_pointcloud, trigger)
+        pointclouds.append(overlay)
+        plot_pointcloud_trigger(clean_pointcloud, trigger) #for plots
+        # pointclouds.append(clean_pointcloud) #for testing
 
     pointclouds = np.array(pointclouds)
     tensor = transpose_and_batch_pointclouds_to_tensor(pointclouds) # (B(radiusbatch), N(pointcount), 3) -> (B, 3, N)

@@ -1,0 +1,2 @@
+label,param_name,param_value,index,seed,acc,auc,ce
+CORR_METRIC,corr_metric,distcorr,0,123,100.0,100.0,0.24597091476304436
