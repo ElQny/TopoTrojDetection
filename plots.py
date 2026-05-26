@@ -104,34 +104,52 @@ def plot_metrics_csv(directory_name: str, filenames: list) -> pd.DataFrame:
         list_of_dfs.append(new)
 
     joined_df = pd.concat(list_of_dfs, ignore_index=True)
-    plot_df = joined_df.melt(id_vars="filename", value_vars=["acc", "auc", "ce"], var_name="metric", value_name="value")
 
-    fig = px.box(
-        plot_df,
-        x="filename",
-        y="value",
-        color="metric",
-        facet_row="metric",
+    acc_auc = joined_df.melt(id_vars = 'filename', value_vars = ['acc', 'auc'], var_name='metric', value_name = 'value')
+    figure_1 = px.box(
+        acc_auc,
+        x='filename',
+        y='value',
+        color='metric',
+        title = 'Accuracy und AUC',
         labels={
-            "filename": "Korrelationsmetrik",
-            "metric": "Metrik",
-            "value": "Wert"
-        },
-        title="Gegenüberstellung der Korrelationsmetriken bei Bild-Pipeline",
+            'filename': 'Korrelationsmetrik',
+            'value': 'Wert',
+            'metric': 'Metrik'
+        }
     )
 
-    fig.update_yaxes(matches=None)
-    fig.update_yaxes(range=[0,1], row=1, col=1) #ce
-    fig.update_yaxes(range=[0,100], row=2, col=1) #auc
-    fig.update_yaxes(range=[0,100], row=3, col=1) #acc
+    figure_1.update_yaxes(range=[0,100])
+    figure_1.update_layout(
+        template='ggplot2',
+        height=400,
+        boxmode='group',
+        showlegend=True,
+    )
 
-    fig.update_layout(
-        template="ggplot2",
-        height=850,
-        showlegend=False, #removes legend to the right
-        boxmode="group" #overlay for no offset -> missalignment with "group"
-    )                   #group for grouped visual
-    fig.show()
+    figure_2 = px.box(
+        joined_df,
+        x='filename',
+        y='ce',
+        title='Cross-Entropy',
+        labels={
+            'filename': 'Korrelationsmetrik',
+            'value': 'Wert',
+            'ce': 'Cross-Entropy'
+        }
+    )
+
+    figure_2.update_yaxes(range=[0,1])
+
+    figure_2.update_layout(
+        template='ggplot2',
+        height=400,
+        showlegend=True,
+    )
+
+    figure_1.show()
+    figure_2.show()
+
     return joined_df
 
 def plot_single_csv(directory_name: str, filename: str) -> pd.DataFrame:
@@ -143,10 +161,6 @@ def plot_single_csv(directory_name: str, filename: str) -> pd.DataFrame:
         plot_df,
         x="metric",
         y="value",
-        labels={
-            "metric": "Metrik",
-            "value": "Wert"
-        },
         title="Bewertung der Pointcloud-Pipeline",
     )
 

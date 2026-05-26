@@ -32,7 +32,7 @@ def lineplot(df_joint, paramname):
 
 
 
-    common_xtitle = 'Parameterwert'
+    xtitle = 'Parameterwert'
     df_len = df_joint.shape[0]
 
     df_joint.plot(
@@ -43,7 +43,7 @@ def lineplot(df_joint, paramname):
         yerr='acc_std',
         legend=False,
         ylabel='ACC (%)',
-        xlabel=common_xtitle,
+        xlabel=xtitle,
         xticks=range(df_len)
     )
     df_joint.plot(
@@ -54,7 +54,7 @@ def lineplot(df_joint, paramname):
         yerr='auc_std',
         legend=False,
         ylabel='AUC (%)',
-        xlabel=common_xtitle,
+        xlabel=xtitle,
         xticks=range(df_len)
     )
     df_joint.plot(
@@ -65,7 +65,7 @@ def lineplot(df_joint, paramname):
         yerr='ce_std',
         legend=False,
         ylabel='CE',
-        xlabel=common_xtitle,
+        xlabel=xtitle,
         xticks=range(df_len)
     )
 
@@ -94,7 +94,7 @@ def plot_csv(csvfile, paramname):
 
     df_joint = df_mean.join(df_std, how='inner', on='param_value').reset_index()
 
-    # boxplot(df, paramname)
+    # boxplot(df,paramname)
     lineplot(df_joint, paramname) #uncomment to use
 
 def main():

@@ -274,6 +274,6 @@ def load_off_file(filepath: str) -> np.array:
 
     return np.array(vertices)
 
-# test: discretizing the pointclouds:
+# 'discretizing' the pointclouds
 def round_point(point: np.array, decimal_positions: int) -> np.array:
     return np.round(point, decimals=decimal_positions)
